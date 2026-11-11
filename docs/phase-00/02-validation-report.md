@@ -118,6 +118,8 @@ Phase 00 共 11 项验证（G1–G10 + MCP 协议探针）全部执行完成，*
 
 限制：nvm 安装的 Node 22.16.0 自带 npm 10.9.2 缺少 `@npmcli/config`，本次用同机 Node 22.18.0 的 npm 10.9.3 CLI 执行安装；Node 运行时仍为 22.16.0。该问题是本机 nvm 安装不完整，不是产品缺陷。
 
+> 环境补充（2026-11-12）：该 npm 10.9.2 安装问题已消失，npm 10.9.2 现可在 CMD 正常使用（`npm -v`、`npm ls`、`npm ci --dry-run` 退出 0）。当前分工为 PowerShell / fnm（Node 24.22.2）与 CMD / nvm-windows（Node 22.16.0）。本节保留为 Phase 00 执行时的历史记录。
+
 证据：`phase00/results/g6-runtime.json`。
 
 ### G7 真实 RSS（pass-with-limit）

@@ -187,7 +187,7 @@ anemia-nexus/
 | 包管理器            | 仅 npm                 | 不使用 pnpm                                               |
 | 构建器              | 仅 tsup                | 不使用 Vite 做构建                                        |
 
-> 当前开发环境为 Node **v24.22.2**、npm **11.19.1**；G6 另用 Node **v22.16.0** 验证下限。`.nvmrc` 写 `24`。nvm 安装的 Node 22.16.0 自带 npm 10.9.2 缺少 `@npmcli/config`，Phase 00 用同机 npm 10.9.3 CLI 执行安装，Node 运行时仍为 22.16.0。
+> 本机双运行时：**PowerShell 由 fnm 管理 Node v24.22.2（npm 11.19.1）**，**CMD 由 nvm-windows 管理 Node v22.16.0（npm 10.9.2）**；`.nvmrc` 写 `24`。npm 10.9.2 现已可在 CMD 中正常使用（已验证 `npm -v`、`npm ls`、`npm ci --dry-run` 均退出 0）。Phase 00/01 记录中的“npm 10.9.2 缺 `@npmcli/config`、临时改用 npm 10.9.3”是当时环境状态，现已恢复。
 
 安装依赖（仅安装工程链；运行时不联网）：
 
@@ -367,7 +367,7 @@ Phase 01 新增加的限制：
 - 真实增量、失效传播、五态状态机的 `dirty` / `indexing` 运行期转换未实现；Phase 01 只有全量 build 与提交/恢复基础。
 - TS 配置只支持可擦除语法；enum / namespace 值可能加载失败。持久授权 `.nexus/trust.json` 只读取，Phase 01 未提供写入口（`--trust-config` 仅本次进程）。
 - `--pager` 不启动外部分页器；`--budget-hint` 只记录，不做裁剪；默认不做分页（无静默截断）。
-- Node 24.22.2 通过从 npm `node` 包下载的独立二进制验证，未修改项目依赖或用户全局配置。
+- 双 Node 验证按本机运行时归属执行：PowerShell / fnm 提供 Node 24.22.2，CMD / nvm-windows 提供 Node 22.16.0；不修改项目依赖或用户全局配置。
 
 规范第 0.3 节事项的当前状态：
 
@@ -391,7 +391,7 @@ Phase 00 新增的限制（必须在 Phase 01 前评审）：
 
 - Phase 01 是否通过负责人评审并进入 Phase 02（**当前不进入**）。
 - 4 个 workspace 包仍为 `private: true`；Phase 07 发布前需按 changesets 流程调整。
-- `npm ci` 基线检查未在本机执行（Node 22.16.0 自带 npm 10.9.2 缺少 `@npmcli/config`；使用同机 npm 10.9.3 CLI 完成安装），记录在 Phase 01 报告中。
+- Phase 01 的 `npm ci` 基线检查当时未执行；npm 10.9.2 现已在 CMD 恢复可用（`npm ci --dry-run` 退出 0），完整 `npm ci` 重装尚未重跑，历史记录见 Phase 01 报告 §11。
 
 如发现文档冲突、关键配置缺失或规范无法落实，应按 [`docs/20-prohibitions.md`](docs/20-prohibitions.md) 的 20.6 提交《架构问题报告》，**不得自行作出架构级决策**。
 
@@ -404,4 +404,4 @@ Phase 00 新增的限制（必须在 Phase 01 前评审）：
 - 修改架构、数据模型、公开接口或验收口径，必须经项目负责人确认并形成版本记录；实现者不得就地改写规范。
 - 跨章节概念变更必须同步 [`docs/23-conflicts.md`](docs/23-conflicts.md) 或对应章节。
 - 阶段报告必须注明所依据的规范版本（v1.24），并按 `docs/19-delivery-phases.md` 19.3 的清单交付。
-- 本项目使用 [Apache License 2.0](LICENSE)，版权人为 `Anemia Nexus contributors`（见 [NOTICE](NOTICE)）。
+- 本项目使用 [Apache License 2.0](LICENSE)，版权人为 `anemiamiyo <anemia114514@gmail.com>`（见 [NOTICE](NOTICE)）。

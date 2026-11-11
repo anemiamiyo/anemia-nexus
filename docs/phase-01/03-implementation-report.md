@@ -42,7 +42,7 @@
 
 | 分组 | 状态 | 主要缺口 |
 |---|---|---|
-| A 入场与基线 | partial | `npm ci` 未执行（npm 10.9.2 不可用），其余完成 |
+| A 入场与基线 | partial | `npm ci` 记录时未执行（npm 10.9.2 当时不可用；2026-11-12 已在 CMD 恢复，见 §11），其余完成 |
 | B 包边界与构建 | implemented | — |
 | C CLI 骨架 | partial | 无外部分页器；无显式 SIGINT→取消传播模型（依赖默认终止 + DB 原子性） |
 | D 配置与 init | partial | 持久 trust 写入口未提供；init 多文件非全量事务；`followTsReferences` 未实现 |
@@ -121,8 +121,8 @@
 8. **init 原子性**：config / example / workspace / root 目录分别写入；中途失败可能留下部分文件（不会留下半截 JSON）。
 9. **分页/预算**：`--pager` 不启动外部分页器；`--budget-hint` 只记录；默认不截断（因此 `nextCursor` 恒为 null）；`--cursor` 只应用 offset。
 10. **无增量**：`update` 返回 E24；`dirty` / `indexing` 运行期转换未实现。
-11. **`npm ci` 未执行**：见 §3；安装使用 npm 10.9.3 CLI + 现有 lockfile。
-12. **Node 24 来源**：通过 npm `node@24.22.2` 包下载到 `.dsh/`（git 忽略），未改项目依赖或用户全局配置。
+11. **`npm ci` 未执行**：见 §3；安装使用 npm 10.9.3 CLI + 现有 lockfile。2026-11-12 环境修正后，npm 10.9.2 可在 CMD 正常使用，`npm ci --dry-run` 已通过（见 §11）。
+12. **Node 24 来源**：记录时通过 npm `node@24.22.2` 包下载到 `.dsh/`（git 忽略）；2026-11-12 起 Node 24.22.2 由 fnm 在 PowerShell 侧提供，临时二进制不再需要（见 §11）。
 13. **F15/F16**：身份迁移仅实现同位置稳定 ID + 基本历史；F16 七注入点与真实崩溃恢复留 Phase 06。
 
 ## 6. 依赖与架构变化
@@ -187,7 +187,7 @@
 - Lint：`npx eslint packages tools` 通过（0 error）。
 - 单元 / 集成测试：`npx vitest run` → 52 passed（Node 22.16.0 与 24.22.2 各一次）。
 - 构建：`npm run build` 通过；连续两次 dist 哈希一致。
-- 未执行项目及原因：`npm ci`（npm 10.9.2 不可用）、百万行性能与真实 RSS（按 D4/D7 延后）、真实 kill -9（Phase 06）。
+- 未执行项目及原因：`npm ci`（记录时 npm 10.9.2 不可用；2026-11-12 已在 CMD 恢复，见 §11）、百万行性能与真实 RSS（按 D4/D7 延后）、真实 kill -9（Phase 06）。
 
 **已知缺陷：**
 
@@ -210,3 +210,11 @@
 1. 是否接受 Phase 01 以 **pass-with-limits** 关闭，并批准进入 Phase 02；
 2. 是否要求在本阶段补齐多 root 查询、`status --json-schema`、SCIP 峰值采集或 `npm ci` 基线后再评审；
 3. 是否允许在 Phase 02 复用本阶段的 SQLite schema、SCIP 适配层与输出契约（不改变 v1.24 技术结论）。
+
+## 11. 环境补充记录（2026-11-12）
+
+本报告 §3、§5、§9 中与 Node / npm 相关的记录属于 Phase 01 执行时的历史状态；执行后本机运行时分工已明确，补充如下：
+
+- **PowerShell**：Node 由 **fnm 1.39.0** 管理，默认 **v24.22.2**（npm 11.19.1）。已用该二进制复验 `node -v`、构建产物 `packages/cli/dist/main.js --version`（`anemia-cli 0.0.0` / `node 24.22.2`）与 `tsc --noEmit`（退出 0）。
+- **CMD**：Node 由 **nvm-windows** 管理，**v22.16.0**（`D:\nodejs`），npm **10.9.2** 已可正常使用：`npm -v` → 10.9.2，`npm ls --depth=0` 与 `npm ci --dry-run` 均退出 0。
+- 因此，报告中的“npm 10.9.2 不可用 / 使用 npm 10.9.3 CLI”不再代表当前环境；`npm ci` 仍未做完整重装（避免破坏已验收的 `node_modules`），只完成了 dry-run。该偏差不影响 G1–G8 结论。

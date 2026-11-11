@@ -129,6 +129,8 @@ pretty 条目集合（按 `path:line:col` 与 `symbolId` 归一）必须等于 l
 
 **未执行**：`npm ci`。原因：本机 Node 22.16.0 的 npm 10.9.2 不可用；`npm ci` 需要清理并重新安装全部依赖，且会运行依赖生命周期脚本。已用 `npm install` 与 lockfile 校验替代；此偏差不影响 G1–G8，但必须如实记录。
 
+**环境补充（2026-11-12）**：运行时归属已明确——PowerShell 用 fnm（Node 24.22.2 / npm 11.19.1），CMD 用 nvm-windows（Node 22.16.0 / npm 10.9.2）。npm 10.9.2 在 CMD 下已恢复正常：`npm -v`、`npm ls --depth=0`、`npm ci --dry-run` 均退出 0；完整 `npm ci` 重装仍未执行，避免破坏已验收的 `node_modules`。上表与上方"未执行"条目保留为 Phase 01 执行时的历史记录。
+
 ### 3.3 A07 依赖审计
 
 - `npm audit` 对 npmmirror 返回 `NOT_IMPLEMENTED`，改用官方 registry 后完成。
