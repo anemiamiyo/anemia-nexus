@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Test output
+coverage/
+
+# Anemia Nexus index (derived data, rebuildable)
+.nexus/
+
+# Local-only fixtures (real projects copied by users)
+fixtures/local/
+
+# Agent workspace (project-level AI collaboration spec is intentionally not tracked)
+.dsh/
+
+# Tool caches
+.turbo/
+.cache/
+.npm-cache/
+
+# Logs and OS noise
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

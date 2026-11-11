@@ -1,0 +1,26 @@
+{
+  "name": "anemia-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Core indexing, storage, and query engine for Anemia Nexus (workspace skeleton)",
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --target node20 --dts --clean",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}
