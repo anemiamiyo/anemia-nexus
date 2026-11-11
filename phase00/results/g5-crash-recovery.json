@@ -1,0 +1,203 @@
+{
+  "group": "G5",
+  "generatedAt": "2026-11-11T16:06:04.482Z",
+  "thresholds": {
+    "injectionPoints": 7,
+    "recoveryMatches": 7,
+    "extraInvalidCases": 2
+  },
+  "summary": {
+    "total": 7,
+    "passed": 7,
+    "extraPass": true,
+    "pass": true
+  },
+  "results": [
+    {
+      "injection": "begin",
+      "pass": true,
+      "crashExitCode": 137,
+      "recovery": {
+        "state": "fresh",
+        "action": "none",
+        "code": null
+      },
+      "manifest": {
+        "buildId": "A",
+        "buildFingerprint": "bf_A",
+        "symbols": 1
+      },
+      "symbols": 1,
+      "records": [
+        {
+          "build_id": "A",
+          "status": "committed"
+        }
+      ],
+      "stderr": ""
+    },
+    {
+      "injection": "pending",
+      "pass": true,
+      "crashExitCode": 137,
+      "recovery": {
+        "state": "fresh",
+        "action": "none",
+        "code": null
+      },
+      "manifest": {
+        "buildId": "A",
+        "buildFingerprint": "bf_A",
+        "symbols": 1
+      },
+      "symbols": 1,
+      "records": [
+        {
+          "build_id": "A",
+          "status": "committed"
+        }
+      ],
+      "stderr": ""
+    },
+    {
+      "injection": "committed-pending",
+      "pass": true,
+      "crashExitCode": 137,
+      "recovery": {
+        "state": "stale",
+        "action": "discard-pending",
+        "code": null
+      },
+      "manifest": {
+        "buildId": "A",
+        "buildFingerprint": "bf_A",
+        "symbols": 1
+      },
+      "symbols": 1,
+      "records": [
+        {
+          "build_id": "A",
+          "status": "committed"
+        }
+      ],
+      "stderr": ""
+    },
+    {
+      "injection": "verified",
+      "pass": true,
+      "crashExitCode": 137,
+      "recovery": {
+        "state": "stale",
+        "action": "discard-pending",
+        "code": null
+      },
+      "manifest": {
+        "buildId": "A",
+        "buildFingerprint": "bf_A",
+        "symbols": 1
+      },
+      "symbols": 1,
+      "records": [
+        {
+          "build_id": "A",
+          "status": "committed"
+        }
+      ],
+      "stderr": ""
+    },
+    {
+      "injection": "committed",
+      "pass": true,
+      "crashExitCode": 137,
+      "recovery": {
+        "state": "fresh",
+        "action": "manifest-repaired",
+        "code": null
+      },
+      "manifest": {
+        "buildId": "B",
+        "buildFingerprint": "bf_B",
+        "symbols": 1
+      },
+      "symbols": 2,
+      "records": [
+        {
+          "build_id": "A",
+          "status": "committed"
+        },
+        {
+          "build_id": "B",
+          "status": "committed"
+        }
+      ],
+      "stderr": ""
+    },
+    {
+      "injection": "manifest-temp",
+      "pass": true,
+      "crashExitCode": 137,
+      "recovery": {
+        "state": "fresh",
+        "action": "manifest-repaired",
+        "code": null
+      },
+      "manifest": {
+        "buildId": "B",
+        "buildFingerprint": "bf_B",
+        "symbols": 1
+      },
+      "symbols": 2,
+      "records": [
+        {
+          "build_id": "A",
+          "status": "committed"
+        },
+        {
+          "build_id": "B",
+          "status": "committed"
+        }
+      ],
+      "stderr": ""
+    },
+    {
+      "injection": "manifest",
+      "pass": true,
+      "crashExitCode": 137,
+      "recovery": {
+        "state": "fresh",
+        "action": "none",
+        "code": null
+      },
+      "manifest": {
+        "buildId": "B",
+        "buildFingerprint": "bf_B",
+        "symbols": 1
+      },
+      "symbols": 2,
+      "records": [
+        {
+          "build_id": "A",
+          "status": "committed"
+        },
+        {
+          "build_id": "B",
+          "status": "committed"
+        }
+      ],
+      "stderr": ""
+    }
+  ],
+  "extra": {
+    "invalidDb": {
+      "state": "invalid",
+      "action": "rebuild-required",
+      "code": "E07",
+      "error": "Error: file is not a database"
+    },
+    "noRecord": {
+      "state": "invalid",
+      "action": "rebuild-required",
+      "code": "E19"
+    }
+  }
+}

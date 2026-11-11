@@ -4,7 +4,7 @@
 > **版本**：v1.24（架构评审修订版）
 > **基线**：v1.23 评审修订版 / v1.0 rev 29
 > **适用对象**：项目负责人、架构评审人员、AI Coding Agent
-> **文档状态**：待冻结评审（**冻结前不得进入 Phase 01**）
+> **文档状态**：**v1.24 已冻结（2026-11-12）**；Phase 01 未授权、未启动。冻结与入场记录见 `phase-01/00-freeze-and-entry.md`。
 
 本目录是 Anemia Nexus 的技术规范主体。内容由上述任务书按章节拆分而来，**技术内容原文照录，未做改写**；每个文件头部标注了来源章节。
 
@@ -49,6 +49,23 @@
 | `23-conflicts.md` | 第 23 章 | 跨章节冲突登记与消解结论（评审第一张检查表） |
 | `appendix-a-d.md` | 附录 A–D | Analyzer/Schema 兼容矩阵、文档职责边界、冻结验收清单、修订对照 |
 | `runtime-api.md` | 2.2 / 3.1（衍生维护文档） | Node 内置 API 最低版本登记；随代码维护，非架构规范 |
+| `phase-00/` | Phase 00 | 范围裁定、验证前门槛声明、验证报告；不是产品规范，也不改写 v1.24 原文 |
+| `phase-01/` | Phase 01 计划 | 冻结与入场记录、完整任务清单；**不是实施报告，也不构成 Phase 01 启动授权** |
+
+### 2.1 Phase 00 材料
+
+| 文件 | 职责 |
+|---|---|
+| `phase-00/00-scope-decisions.md` | 负责人批准的 Phase 00 范围偏差（Node 24、Apache-2.0、跳过百万行档） |
+| `phase-00/01-plan-and-thresholds.md` | 验证前声明的 G1–G10 门槛与判定规则 |
+| `phase-00/02-validation-report.md` | 执行结果、pass/pass-with-limit 结论、限制与残余风险 |
+
+### 2.2 Phase 01 计划材料
+
+| 文件 | 职责 |
+|---|---|
+| `phase-01/00-freeze-and-entry.md` | v1.24 冻结决定、负责人裁定 D6–D9、冻结期问题登记、Phase 01 入场条件 |
+| `phase-01/01-task-checklist.md` | Phase 01 完整任务清单、gate、完成定义；仅计划，不代表已启动 |
 
 ## 3. 章节编号约定
 

@@ -1,0 +1,53 @@
+{
+  "group": "G10",
+  "generatedAt": "2026-11-11T16:06:39.151Z",
+  "thresholds": {
+    "comparisonFields": 10,
+    "allEqual": true
+  },
+  "summary": {
+    "total": 10,
+    "equal": 10,
+    "pass": true,
+    "reusedFiles": 12,
+    "incrementalFiles": 20,
+    "buildFingerprint": "bf_87be73b92d29410c64cb"
+  },
+  "comparisons": {
+    "symbols": {
+      "equal": true
+    },
+    "identity": {
+      "equal": true
+    },
+    "references": {
+      "equal": true
+    },
+    "exports": {
+      "equal": true
+    },
+    "files": {
+      "equal": true
+    },
+    "surfaceHash": {
+      "equal": true,
+      "incrementalValue": "sh_c7fce894367d1b69",
+      "fullValue": "sh_c7fce894367d1b69"
+    },
+    "edges": {
+      "equal": true
+    },
+    "buildFingerprint": {
+      "equal": true,
+      "incrementalValue": "bf_87be73b92d29410c64cb",
+      "fullValue": "bf_87be73b92d29410c64cb"
+    },
+    "coverage": {
+      "equal": true
+    },
+    "manifest": {
+      "equal": true
+    }
+  },
+  "limitation": "Prototype: unchanged file symbol/export records are reused from cache, but references/dependencies/calls are recomputed globally because cross-file edges may change. Phase 01 must implement per-root invalidation and prove it against the same ten-field comparison."
+}

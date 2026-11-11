@@ -1,0 +1,111 @@
+{
+  "group": "G9",
+  "generatedAt": "2026-11-11T16:06:37.394Z",
+  "verdict": "pass-with-limit",
+  "limitation": "Prototype isolates TS config in a child process with Node --permission, an ESM loader and a CJS require hook. It blocks network modules and fetch, but is not a universal OS-level network sandbox; Phase 01 must harden and test on the target platforms.",
+  "thresholds": {
+    "maliciousCases": 7,
+    "tsConfigAuthorization": true
+  },
+  "summary": {
+    "total": 7,
+    "passed": 7,
+    "extraPass": true,
+    "pass": true
+  },
+  "scenarios": {
+    "readOutsideRoot": {
+      "name": "readOutsideRoot",
+      "pass": true,
+      "assertions": {
+        "stdout": "READ_DENIED:ERR_ACCESS_DENIED",
+        "stderrTail": [
+          ""
+        ]
+      }
+    },
+    "networkFetch": {
+      "name": "networkFetch",
+      "pass": true,
+      "assertions": {
+        "stdout": "FETCH_DENIED:NETWORK_DISABLED"
+      }
+    },
+    "writeOutsideRoot": {
+      "name": "writeOutsideRoot",
+      "pass": true,
+      "assertions": {
+        "stdout": "WRITE_DENIED:ERR_ACCESS_DENIED",
+        "fileExists": false
+      }
+    },
+    "postinstallNotExecuted": {
+      "name": "postinstallNotExecuted",
+      "pass": true,
+      "assertions": {
+        "scriptPresent": true,
+        "markerExists": false
+      }
+    },
+    "maliciousCommand": {
+      "name": "maliciousCommand",
+      "pass": true,
+      "assertions": {
+        "rejected": {
+          "ok": false,
+          "code": "E17",
+          "reason": "destructive command rejected"
+        },
+        "allowed": {
+          "ok": true
+        }
+      }
+    },
+    "unauthorizedVerify": {
+      "name": "unauthorizedVerify",
+      "pass": true,
+      "assertions": {
+        "skipped": {
+          "status": "skipped-unauthorized"
+        },
+        "explicit": {
+          "status": "error",
+          "code": "E12"
+        }
+      }
+    },
+    "untrustedPlugin": {
+      "name": "untrustedPlugin",
+      "pass": true,
+      "assertions": {
+        "official": {
+          "enabled": true,
+          "untrusted": false
+        },
+        "disabled": {
+          "enabled": false,
+          "reason": "untrusted-plugin-disabled"
+        },
+        "allowed": {
+          "enabled": true,
+          "untrusted": true
+        }
+      }
+    }
+  },
+  "extra": {
+    "unauthorized": {
+      "ok": false,
+      "code": "E18",
+      "reason": "TypeScript config requires explicit authorization"
+    },
+    "trusted": {
+      "ok": true,
+      "value": {
+        "ok": true,
+        "loaded": true,
+        "marker": "benign-config"
+      }
+    }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "group": "G6",
+  "generatedAt": "2026-11-11T16:06:26.095Z",
+  "thresholds": {
+    "runtimes": 2,
+    "installBuildTestProbe": true
+  },
+  "summary": {
+    "total": 2,
+    "passed": 2,
+    "pass": true
+  },
+  "results": [
+    {
+      "runtime": "22.16.0",
+      "pass": true,
+      "nodeVersion": "v22.16.0",
+      "npmVersion": "10.9.3",
+      "npmNote": "nvm 安装的 npm 10.9.2 缺少 @npmcli/config；使用同机 Node 22.18.0 自带的 npm 10.9.3 CLI 执行安装，Node 运行时仍为 22.16.0。",
+      "probe": {
+        "ok": true,
+        "node": "v22.16.0",
+        "npm": null,
+        "platform": "win32/x64",
+        "checks": {
+          "sqlite": true,
+          "styleText": true,
+          "watch": true,
+          "abortSignalTimeout": true
+        }
+      },
+      "install": {
+        "exitCode": 0,
+        "tail": "added 264 packages in 4s"
+      },
+      "build": {
+        "exitCode": 0,
+        "tail": "ESM ⚡️ Build success in 26ms\nDTS Build start\nDTS ⚡️ Build success in 577ms\nDTS dist\\index.d.ts 13.00 B\nnpm warn Unknown env config \"home\". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.\nnpm warn Unknown user config \"home\". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options."
+      },
+      "test": {
+        "exitCode": 0,
+        "tail": " RUN  v5.1.0 D:/anemia-nexus\n\nNo test files found, exiting with code 0\n\ninclude: packages/*/test/**/*.test.ts\nexclude:  **/node_modules/**, **/.git/**"
+      }
+    },
+    {
+      "runtime": "24.22.2",
+      "pass": true,
+      "nodeVersion": "v24.22.2",
+      "npmVersion": "11.19.1",
+      "probe": {
+        "ok": true,
+        "node": "v24.22.2",
+        "npm": null,
+        "platform": "win32/x64",
+        "checks": {
+          "sqlite": true,
+          "styleText": true,
+          "watch": true,
+          "abortSignalTimeout": true
+        }
+      },
+      "install": {
+        "exitCode": 0,
+        "tail": "npm warn install-scripts   esbuild@0.27.7 (postinstall: node install.js)\nnpm warn install-scripts   esbuild@0.28.2 (postinstall: node install.js)\nnpm warn install-scripts\nnpm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.\n\nadded 264 packages in 4s"
+      },
+      "build": {
+        "exitCode": 0,
+        "tail": "DTS Build start\nDTS ⚡️ Build success in 487ms\nDTS dist\\index.d.ts 13.00 B\nnpm warn Unknown user config \"home\". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.\nnpm warn Unknown env config \"home\". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.\nnpm warn Unknown user config \"home\". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options."
+      },
+      "test": {
+        "exitCode": 0,
+        "tail": "\nNo test files found, exiting with code 0\n\nnpm warn Unknown user config \"home\". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.\ninclude: packages/*/test/**/*.test.ts\nexclude:  **/node_modules/**, **/.git/**"
+      }
+    }
+  ]
+}

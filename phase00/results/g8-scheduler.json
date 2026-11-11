@@ -1,0 +1,68 @@
+{
+  "group": "G8",
+  "generatedAt": "2026-11-11T16:06:37.052Z",
+  "verdict": "pass-with-limit",
+  "limitation": "Prototype scheduler uses deterministic memory-pressure input rather than live process RSS; Phase 01/06 must integrate the real Global Resource Coordinator and RSS probe.",
+  "thresholds": {
+    "ladderLevels": 5,
+    "cancelMs": 2000,
+    "oldIndexRetained": true,
+    "noPartialCommit": true
+  },
+  "summary": {
+    "total": 3,
+    "passed": 3,
+    "pass": true
+  },
+  "scenarios": {
+    "ladder": {
+      "name": "ladder",
+      "pass": true,
+      "assertions": {
+        "actions": [
+          "disable-calls",
+          "chunked",
+          "reduce-vue-projection",
+          "serialize",
+          "abort-root"
+        ],
+        "expected": [
+          "disable-calls",
+          "chunked",
+          "reduce-vue-projection",
+          "serialize",
+          "abort-root"
+        ],
+        "aborted": true,
+        "code": "E20"
+      }
+    },
+    "cancellation": {
+      "name": "cancellation",
+      "pass": true,
+      "assertions": {
+        "allRejected": true,
+        "elapsedMs": 43,
+        "noFinalWrites": true,
+        "states": [
+          "rejected",
+          "rejected",
+          "rejected"
+        ]
+      }
+    },
+    "failureIsolation": {
+      "name": "failureIsolation",
+      "pass": true,
+      "assertions": {
+        "failedRoots": [
+          "root-b"
+        ],
+        "oldB": "old-root-b",
+        "aUpdated": true,
+        "cUpdated": true,
+        "bTempGone": true
+      }
+    }
+  }
+}

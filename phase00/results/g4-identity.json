@@ -1,0 +1,155 @@
+{
+  "group": "G4",
+  "generatedAt": "2026-11-11T16:06:03.950Z",
+  "fixture": "fixtures/F15-identity",
+  "thresholds": {
+    "scenarios": 8,
+    "inheritedLowConfidence": 0
+  },
+  "summary": {
+    "total": 8,
+    "passed": 8,
+    "pass": true
+  },
+  "scenarios": {
+    "rename": {
+      "name": "rename",
+      "pass": true,
+      "assertions": {
+        "idSame": true,
+        "confidence": "high",
+        "evidence": [
+          "E1",
+          "E2",
+          "E3",
+          "E4",
+          "E5",
+          "E6"
+        ],
+        "renamePairs": [
+          [
+            "src/rename-me.ts",
+            "src/renamed-me.ts"
+          ]
+        ],
+        "afterPath": "src/renamed-me.ts"
+      }
+    },
+    "move": {
+      "name": "move",
+      "pass": true,
+      "assertions": {
+        "idSame": true,
+        "confidence": "high",
+        "evidence": [
+          "E1",
+          "E2",
+          "E3",
+          "E4",
+          "E5",
+          "E6"
+        ],
+        "afterPath": "src/moved/deep/move-me.ts",
+        "renamePairs": [
+          [
+            "src/move-me.ts",
+            "src/moved/deep/move-me.ts"
+          ]
+        ]
+      }
+    },
+    "swap": {
+      "name": "swap",
+      "pass": true,
+      "assertions": {
+        "decisions": [
+          {
+            "symbolId": "s_990cb79b2383c2d2#383d34c",
+            "confidence": "low",
+            "candidates": [
+              "s_4996d7fe9078bbc6",
+              "s_990cb79b2383c2d2"
+            ],
+            "identityAmbiguous": true
+          },
+          {
+            "symbolId": "s_4996d7fe9078bbc6#4fb6544",
+            "confidence": "low",
+            "candidates": [
+              "s_990cb79b2383c2d2",
+              "s_4996d7fe9078bbc6"
+            ],
+            "identityAmbiguous": true
+          }
+        ],
+        "anyIdInherited": false
+      }
+    },
+    "sameNameAdd": {
+      "name": "sameNameAdd",
+      "pass": true,
+      "assertions": {
+        "oldId": "s_c21d1d4b557535ee",
+        "oldResolvedId": "s_c21d1d4b557535ee",
+        "newId": "s_8bca7de6a700a23a",
+        "newConfidence": "low",
+        "merged": false
+      }
+    },
+    "deleteRecreate": {
+      "name": "deleteRecreate",
+      "pass": true,
+      "assertions": {
+        "oldId": "s_60bc7bdb61a9379f",
+        "oldRetired": true,
+        "newId": "s_60bc7bdb61a9379f#d53e650",
+        "confidence": "low",
+        "identityAmbiguous": false,
+        "note": "E3+E6 medium path not exercised in this run; default new-identity rule verified."
+      }
+    },
+    "bodyChange": {
+      "name": "bodyChange",
+      "pass": true,
+      "assertions": {
+        "idSame": true,
+        "fingerprintChanged": true,
+        "confidence": "high",
+        "evidence": [
+          "same-position"
+        ]
+      }
+    },
+    "multiCandidate": {
+      "name": "multiCandidate",
+      "pass": true,
+      "assertions": {
+        "decisions": [
+          {
+            "path": "src/twin-c.ts",
+            "symbolId": "s_345aa5c6732f673f#90931d7",
+            "confidence": "low",
+            "candidates": [
+              "s_345aa5c6732f673f",
+              "s_345aa5c6732f673f#29ba399"
+            ],
+            "identityAmbiguous": true
+          }
+        ],
+        "anyIdInherited": false
+      }
+    },
+    "crossRoot": {
+      "name": "crossRoot",
+      "pass": true,
+      "assertions": {
+        "oldId": "s_ce2da719a09404c1",
+        "oldRoot": "@fixture/lib",
+        "newId": "s_e49346bc2ccdf9b8",
+        "newRoot": "@fixture/other",
+        "oldRetired": true,
+        "confidence": "low"
+      }
+    }
+  }
+}

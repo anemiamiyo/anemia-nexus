@@ -1,0 +1,180 @@
+{
+  "group": "G7",
+  "generatedAt": "2026-11-11T16:06:36.928Z",
+  "verdict": "pass-with-limit",
+  "limitation": "RSS covers TypeScript Program construction, declaration/reference traversal, and SQLite writes. The SCIP subprocess is measured separately in G1 and is not included in this peak; Phase 01/06 must measure the integrated pipeline.",
+  "thresholds": {
+    "repetitions": 3,
+    "scaleCount": 2,
+    "millionLineSkippedByOwner": true
+  },
+  "summary": {
+    "total": 2,
+    "passed": 2,
+    "pass": true
+  },
+  "results": [
+    {
+      "scale": "50k",
+      "pass": true,
+      "environment": {
+        "projectLoc": 62250,
+        "fileCount": 50,
+        "dependencyCount": 0,
+        "tsRatio": 1,
+        "vueRatio": 0,
+        "nodeVersion": "v24.22.2",
+        "os": "win32",
+        "osVersion": "10.0.19045",
+        "cpuModel": "Intel(R) Core(TM) i7-10700KF CPU @ 3.80GHz",
+        "cpuCores": 16,
+        "availableMemMB": 18591,
+        "scenario": "P1-cold-full-index",
+        "repetitions": 3,
+        "sampling": "50ms setInterval plus phase checkpoints",
+        "note": "SCIP stage not included in this measurement; see G1 and the Phase 00 report limitation."
+      },
+      "thresholds": {
+        "targetRssMB": 400,
+        "hardRssMB": 550,
+        "targetQueryMB": 60
+      },
+      "summary": {
+        "medianPeakRssMB": 301.8,
+        "maxPeakRssMB": 301.8,
+        "medianQueryRssMB": 36.1,
+        "medianDurationMs": 750,
+        "medianDbSizeMB": 2.7,
+        "pass": true
+      },
+      "runs": [
+        {
+          "rep": 1,
+          "projectDir": "D:\\anemia-nexus\\phase00\\tmp\\g7\\50k",
+          "node": "v24.22.2",
+          "files": 50,
+          "loc": 62250,
+          "symbols": 31200,
+          "peakRssMB": 301.8,
+          "finalRssMB": 323.1,
+          "durationMs": 750,
+          "dbSizeMB": 2.7,
+          "buildDurationMs": 750,
+          "queryRssMB": 36.2,
+          "queryDurationMs": 2
+        },
+        {
+          "rep": 2,
+          "projectDir": "D:\\anemia-nexus\\phase00\\tmp\\g7\\50k",
+          "node": "v24.22.2",
+          "files": 50,
+          "loc": 62250,
+          "symbols": 31200,
+          "peakRssMB": 301.8,
+          "finalRssMB": 324.9,
+          "durationMs": 752,
+          "dbSizeMB": 2.7,
+          "buildDurationMs": 752,
+          "queryRssMB": 36.1,
+          "queryDurationMs": 2
+        },
+        {
+          "rep": 3,
+          "projectDir": "D:\\anemia-nexus\\phase00\\tmp\\g7\\50k",
+          "node": "v24.22.2",
+          "files": 50,
+          "loc": 62250,
+          "symbols": 31200,
+          "peakRssMB": 301.8,
+          "finalRssMB": 325.1,
+          "durationMs": 750,
+          "dbSizeMB": 2.7,
+          "buildDurationMs": 750,
+          "queryRssMB": 36.1,
+          "queryDurationMs": 2
+        }
+      ]
+    },
+    {
+      "scale": "300k",
+      "pass": true,
+      "environment": {
+        "projectLoc": 298800,
+        "fileCount": 240,
+        "dependencyCount": 0,
+        "tsRatio": 1,
+        "vueRatio": 0,
+        "nodeVersion": "v24.22.2",
+        "os": "win32",
+        "osVersion": "10.0.19045",
+        "cpuModel": "Intel(R) Core(TM) i7-10700KF CPU @ 3.80GHz",
+        "cpuCores": 16,
+        "availableMemMB": 18492,
+        "scenario": "P1-cold-full-index",
+        "repetitions": 3,
+        "sampling": "50ms setInterval plus phase checkpoints",
+        "note": "SCIP stage not included in this measurement; see G1 and the Phase 00 report limitation."
+      },
+      "thresholds": {
+        "targetRssMB": 700,
+        "hardRssMB": 900,
+        "targetQueryMB": 100
+      },
+      "summary": {
+        "medianPeakRssMB": 652,
+        "maxPeakRssMB": 652,
+        "medianQueryRssMB": 37,
+        "medianDurationMs": 2179,
+        "medianDbSizeMB": 13.5,
+        "pass": true
+      },
+      "runs": [
+        {
+          "rep": 1,
+          "projectDir": "D:\\anemia-nexus\\phase00\\tmp\\g7\\300k",
+          "node": "v24.22.2",
+          "files": 240,
+          "loc": 298800,
+          "symbols": 149760,
+          "peakRssMB": 652,
+          "finalRssMB": 665.3,
+          "durationMs": 2244,
+          "dbSizeMB": 13.5,
+          "buildDurationMs": 2244,
+          "queryRssMB": 37,
+          "queryDurationMs": 4
+        },
+        {
+          "rep": 2,
+          "projectDir": "D:\\anemia-nexus\\phase00\\tmp\\g7\\300k",
+          "node": "v24.22.2",
+          "files": 240,
+          "loc": 298800,
+          "symbols": 149760,
+          "peakRssMB": 651,
+          "finalRssMB": 664.5,
+          "durationMs": 2161,
+          "dbSizeMB": 13.5,
+          "buildDurationMs": 2161,
+          "queryRssMB": 37,
+          "queryDurationMs": 4
+        },
+        {
+          "rep": 3,
+          "projectDir": "D:\\anemia-nexus\\phase00\\tmp\\g7\\300k",
+          "node": "v24.22.2",
+          "files": 240,
+          "loc": 298800,
+          "symbols": 149760,
+          "peakRssMB": 652,
+          "finalRssMB": 665.9,
+          "durationMs": 2179,
+          "dbSizeMB": 13.5,
+          "buildDurationMs": 2179,
+          "queryRssMB": 37,
+          "queryDurationMs": 4
+        }
+      ]
+    }
+  ]
+}

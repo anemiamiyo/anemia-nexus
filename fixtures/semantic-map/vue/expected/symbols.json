@@ -1,0 +1,4 @@
+{
+  "App.vue": ["Child", "msg", "count", "onClick"],
+  "Child.vue": ["emit", "fire"]
+}

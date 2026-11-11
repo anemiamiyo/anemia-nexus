@@ -1,0 +1,182 @@
+{
+  "generatedAt": "2026-11-11T16:06:40.041Z",
+  "node": "v24.22.2",
+  "total": 11,
+  "passed": 11,
+  "pass": true,
+  "results": [
+    {
+      "id": "G1",
+      "script": "phase00/g1-g3/run-g1.mjs",
+      "exitCode": 0,
+      "elapsedMs": 1845,
+      "pass": true,
+      "stdoutTail": [
+        "  }",
+        "}",
+        "unmappedReasons {}",
+        "pass true"
+      ],
+      "stderrTail": [
+        ""
+      ]
+    },
+    {
+      "id": "G2",
+      "script": "phase00/g1-g3/run-g2.mjs",
+      "exitCode": 0,
+      "elapsedMs": 2405,
+      "pass": true,
+      "stdoutTail": [
+        "  \"missingKinds\": [],",
+        "  \"vueTscExitCode\": 0,",
+        "  \"pass\": true",
+        "}"
+      ],
+      "stderrTail": [
+        ""
+      ]
+    },
+    {
+      "id": "G3",
+      "script": "phase00/g1-g3/run-g3.mjs",
+      "exitCode": 0,
+      "elapsedMs": 845,
+      "pass": true,
+      "stdoutTail": [
+        "T04 PASS",
+        "T05 PASS",
+        "T06 PASS",
+        "T08 PASS"
+      ],
+      "stderrTail": [
+        ""
+      ]
+    },
+    {
+      "id": "G4",
+      "script": "phase00/g4/run-identity.mjs",
+      "exitCode": 0,
+      "elapsedMs": 9819,
+      "pass": true,
+      "stdoutTail": [
+        "deleteRecreate PASS",
+        "bodyChange PASS",
+        "multiCandidate PASS",
+        "crossRoot PASS"
+      ],
+      "stderrTail": [
+        ""
+      ]
+    },
+    {
+      "id": "G5",
+      "script": "phase00/g5/run-crash-recovery.mjs",
+      "exitCode": 0,
+      "elapsedMs": 494,
+      "pass": true,
+      "stdoutTail": [
+        "committed PASS {\"state\":\"fresh\",\"action\":\"manifest-repaired\",\"code\":null}",
+        "manifest-temp PASS {\"state\":\"fresh\",\"action\":\"manifest-repaired\",\"code\":null}",
+        "manifest PASS {\"state\":\"fresh\",\"action\":\"none\",\"code\":null}",
+        "extra PASS {\"invalid\":{\"state\":\"invalid\",\"action\":\"rebuild-required\",\"code\":\"E07\",\"error\":\"Error: file is not a database\"},\"noRecord\":{\"state\":\"invalid\",\"action\":\"rebuild-required\",\"code\":\"E19\"}}"
+      ],
+      "stderrTail": [
+        ""
+      ]
+    },
+    {
+      "id": "G6",
+      "script": "phase00/g6/run-runtime.mjs",
+      "exitCode": 0,
+      "elapsedMs": 21614,
+      "pass": true,
+      "stdoutTail": [
+        "{\"total\":2,\"passed\":2,\"pass\":true}",
+        "22.16.0 PASS install 0 build 0 test 0 probe true",
+        "24.22.2 PASS install 0 build 0 test 0 probe true"
+      ],
+      "stderrTail": [
+        ""
+      ]
+    },
+    {
+      "id": "G7",
+      "script": "phase00/g7/run-rss.mjs",
+      "exitCode": 0,
+      "elapsedMs": 10832,
+      "pass": true,
+      "stdoutTail": [
+        "{\"total\":2,\"passed\":2,\"pass\":true}",
+        "50k PASS {\"medianPeakRssMB\":301.8,\"maxPeakRssMB\":301.8,\"medianQueryRssMB\":36.1,\"medianDurationMs\":750,\"medianDbSizeMB\":2.7,\"pass\":true}",
+        "300k PASS {\"medianPeakRssMB\":652,\"maxPeakRssMB\":652,\"medianQueryRssMB\":37,\"medianDurationMs\":2179,\"medianDbSizeMB\":13.5,\"pass\":true}"
+      ],
+      "stderrTail": [
+        ""
+      ]
+    },
+    {
+      "id": "G8",
+      "script": "phase00/g8/run-scheduler.mjs",
+      "exitCode": 0,
+      "elapsedMs": 124,
+      "pass": true,
+      "stdoutTail": [
+        "{\"total\":3,\"passed\":3,\"pass\":true}",
+        "ladder PASS",
+        "cancellation PASS",
+        "failureIsolation PASS"
+      ],
+      "stderrTail": [
+        ""
+      ]
+    },
+    {
+      "id": "G9",
+      "script": "phase00/g9/run-security.mjs",
+      "exitCode": 0,
+      "elapsedMs": 343,
+      "pass": true,
+      "stdoutTail": [
+        "maliciousCommand PASS",
+        "unauthorizedVerify PASS",
+        "untrustedPlugin PASS",
+        "extra PASS {\"unauthorized\":{\"ok\":false,\"code\":\"E18\",\"reason\":\"TypeScript config requires explicit authorization\"},\"trusted\":{\"ok\":true,\"value\":{\"ok\":true,\"loaded\":true,\"marker\":\"benign-config\"}}}"
+      ],
+      "stderrTail": [
+        ""
+      ]
+    },
+    {
+      "id": "G10",
+      "script": "phase00/g10/run-equivalence.mjs",
+      "exitCode": 0,
+      "elapsedMs": 1784,
+      "pass": true,
+      "stdoutTail": [
+        "edges EQUAL",
+        "buildFingerprint EQUAL",
+        "coverage EQUAL",
+        "manifest EQUAL"
+      ],
+      "stderrTail": [
+        ""
+      ]
+    },
+    {
+      "id": "MCP",
+      "script": "phase00/mcp/run-probe.mjs",
+      "exitCode": 0,
+      "elapsedMs": 853,
+      "pass": true,
+      "stdoutTail": [
+        "{\"total\":2,\"passed\":2,\"pass\":true}",
+        "22.16.0 PASS {\"ok\":true,\"node\":\"v22.16.0\",\"protocolVersion\":\"2025-11-25\",\"serverVersion\":{\"name\":\"phase00-echo\",\"version\":\"0.0.0\"},\"tools\":[\"echo\"],\"toolCount\":1,\"content\":[{\"type\":\"text\",\"text\":\"hello-phase00\"}],\"structuredContent\":{\"text\":\"hello-phase00\"},\"elapsedMs\":222}",
+        "24.22.2 PASS {\"ok\":true,\"node\":\"v24.22.2\",\"protocolVersion\":\"2025-11-25\",\"serverVersion\":{\"name\":\"phase00-echo\",\"version\":\"0.0.0\"},\"tools\":[\"echo\"],\"toolCount\":1,\"content\":[{\"type\":\"text\",\"text\":\"hello-phase00\"}],\"structuredContent\":{\"text\":\"hello-phase00\"},\"elapsedMs\":199}"
+      ],
+      "stderrTail": [
+        ""
+      ]
+    }
+  ]
+}

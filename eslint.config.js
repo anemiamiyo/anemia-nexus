@@ -12,6 +12,7 @@ export default tseslint.config(
       '.dsh/**',
       'docs/**',
       'fixtures/**',
+      'phase00/**',
     ],
   },
   js.configs.recommended,

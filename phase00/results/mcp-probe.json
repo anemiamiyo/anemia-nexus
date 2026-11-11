@@ -1,0 +1,76 @@
+{
+  "group": "MCP",
+  "generatedAt": "2026-11-11T16:06:40.033Z",
+  "thresholds": {
+    "maxWallMs": 30000,
+    "tools": 1,
+    "negotiatedProtocolRecorded": true
+  },
+  "summary": {
+    "total": 2,
+    "passed": 2,
+    "pass": true
+  },
+  "results": [
+    {
+      "runtime": "22.16.0",
+      "pass": true,
+      "exitCode": 0,
+      "wallMs": 439,
+      "probe": {
+        "ok": true,
+        "node": "v22.16.0",
+        "protocolVersion": "2025-11-25",
+        "serverVersion": {
+          "name": "phase00-echo",
+          "version": "0.0.0"
+        },
+        "tools": [
+          "echo"
+        ],
+        "toolCount": 1,
+        "content": [
+          {
+            "type": "text",
+            "text": "hello-phase00"
+          }
+        ],
+        "structuredContent": {
+          "text": "hello-phase00"
+        },
+        "elapsedMs": 222
+      },
+      "stderr": ""
+    },
+    {
+      "runtime": "24.22.2",
+      "pass": true,
+      "exitCode": 0,
+      "wallMs": 367,
+      "probe": {
+        "ok": true,
+        "node": "v24.22.2",
+        "protocolVersion": "2025-11-25",
+        "serverVersion": {
+          "name": "phase00-echo",
+          "version": "0.0.0"
+        },
+        "tools": [
+          "echo"
+        ],
+        "toolCount": 1,
+        "content": [
+          {
+            "type": "text",
+            "text": "hello-phase00"
+          }
+        ],
+        "structuredContent": {
+          "text": "hello-phase00"
+        },
+        "elapsedMs": 199
+      },
+      "stderr": ""
+    }
+  ]
+}

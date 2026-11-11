@@ -1,0 +1,227 @@
+{
+  "group": "G2",
+  "generatedAt": "2026-11-11T16:05:53.304Z",
+  "fixture": "fixtures/semantic-map/vue",
+  "thresholds": {
+    "userSymbolSetConsistency": 1,
+    "requiredKinds": [
+      "component-use",
+      "event-binding",
+      "directive-binding",
+      "prop-binding",
+      "interpolation"
+    ],
+    "slotContentEdgesAtLeast": 1,
+    "ghostVlsRefs": 0,
+    "invalidCoordinates": 0,
+    "vueTscErrors": 0
+  },
+  "summary": {
+    "symbolSetMatches": true,
+    "userSymbols": {
+      "App.vue": [
+        "Child",
+        "count",
+        "msg",
+        "onClick"
+      ],
+      "Child.vue": [
+        "emit",
+        "fire"
+      ]
+    },
+    "expectedSymbols": {
+      "App.vue": [
+        "Child",
+        "count",
+        "msg",
+        "onClick"
+      ],
+      "Child.vue": [
+        "emit",
+        "fire"
+      ]
+    },
+    "unmappedSymbols": [],
+    "counts": {
+      "prop-binding": 1,
+      "event-binding": 3,
+      "interpolation": 3,
+      "directive-binding": 1,
+      "component-use": 1
+    },
+    "slotContentEdges": 1,
+    "ghostRefs": 0,
+    "unmappedTemplateRefs": 0,
+    "invalidCoordinates": 0,
+    "missingKinds": [],
+    "vueTscExitCode": 0,
+    "pass": true
+  },
+  "vueTsc": {
+    "command": "C:\\Users\\Anemia\\AppData\\Roaming\\fnm\\node-versions\\v24.22.2\\installation\\node.exe node_modules/vue-tsc/bin/vue-tsc.js --noEmit -p fixtures\\semantic-map\\vue\\tsconfig.json",
+    "stdout": "",
+    "stderr": ""
+  },
+  "edges": [
+    {
+      "kind": "prop-binding",
+      "target": "msg",
+      "file": "App.vue",
+      "line": 13,
+      "col": 17,
+      "sourceOffset": 187,
+      "inSlotContent": false
+    },
+    {
+      "kind": "event-binding",
+      "target": "onClick",
+      "file": "App.vue",
+      "line": 13,
+      "col": 31,
+      "sourceOffset": 201,
+      "inSlotContent": false
+    },
+    {
+      "kind": "interpolation",
+      "target": "msg",
+      "file": "App.vue",
+      "line": 15,
+      "col": 15,
+      "sourceOffset": 250,
+      "inSlotContent": true
+    },
+    {
+      "kind": "interpolation",
+      "target": "msg",
+      "file": "App.vue",
+      "line": 18,
+      "col": 8,
+      "sourceOffset": 299,
+      "inSlotContent": false
+    },
+    {
+      "kind": "directive-binding",
+      "target": "count",
+      "file": "App.vue",
+      "line": 19,
+      "col": 16,
+      "sourceOffset": 326,
+      "inSlotContent": false
+    },
+    {
+      "kind": "event-binding",
+      "target": "onClick",
+      "file": "App.vue",
+      "line": 19,
+      "col": 35,
+      "sourceOffset": 345,
+      "inSlotContent": false
+    },
+    {
+      "kind": "component-use",
+      "target": "Child",
+      "file": "App.vue",
+      "line": 13,
+      "col": 3,
+      "sourceOffset": 173,
+      "inSlotContent": false
+    },
+    {
+      "kind": "event-binding",
+      "target": "fire",
+      "file": "Child.vue",
+      "line": 12,
+      "col": 18,
+      "sourceOffset": 227,
+      "inSlotContent": false
+    },
+    {
+      "kind": "interpolation",
+      "target": "label",
+      "file": "Child.vue",
+      "line": 12,
+      "col": 27,
+      "sourceOffset": 236,
+      "inSlotContent": false
+    }
+  ],
+  "ghostRefList": [],
+  "unmappedTemplateRefs": [],
+  "rangesByFile": {
+    "App.vue": [
+      {
+        "kind": "component-use",
+        "start": 173,
+        "end": 178,
+        "tag": "Child",
+        "inSlotContent": false
+      },
+      {
+        "kind": "component-use-close",
+        "start": 284,
+        "end": 289,
+        "tag": "Child",
+        "inSlotContent": false
+      },
+      {
+        "kind": "prop-binding",
+        "start": 187,
+        "end": 190,
+        "text": "msg",
+        "inSlotContent": false
+      },
+      {
+        "kind": "event-binding",
+        "start": 201,
+        "end": 208,
+        "text": "onClick",
+        "inSlotContent": false
+      },
+      {
+        "kind": "interpolation",
+        "start": 250,
+        "end": 253,
+        "text": "msg",
+        "inSlotContent": true
+      },
+      {
+        "kind": "interpolation",
+        "start": 299,
+        "end": 302,
+        "text": "msg",
+        "inSlotContent": false
+      },
+      {
+        "kind": "directive-binding",
+        "start": 326,
+        "end": 335,
+        "text": "count > 0",
+        "inSlotContent": false
+      },
+      {
+        "kind": "event-binding",
+        "start": 345,
+        "end": 352,
+        "text": "onClick",
+        "inSlotContent": false
+      }
+    ],
+    "Child.vue": [
+      {
+        "kind": "event-binding",
+        "start": 227,
+        "end": 231,
+        "text": "fire",
+        "inSlotContent": false
+      },
+      {
+        "kind": "interpolation",
+        "start": 236,
+        "end": 241,
+        "text": "label",
+        "inSlotContent": false
+      }
+    ]
+  }
+}

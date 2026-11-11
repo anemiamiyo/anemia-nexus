@@ -22,6 +22,12 @@ fixtures/local/
 .cache/
 .npm-cache/
 
+# Phase 00 scratch and generated artifacts
+phase00/tmp/
+phase00/results/raw/
+fixtures/**/index.scip
+fixtures/**/.nexus/
+
 # Logs and OS noise
 *.log
 npm-debug.log*

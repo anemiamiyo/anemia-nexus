@@ -1,0 +1,142 @@
+{
+  "group": "G1",
+  "generatedAt": "2026-11-11T16:05:50.899Z",
+  "environment": {
+    "node": "v24.22.2",
+    "typescript": "5.9.3",
+    "scipVersion": "0.4.0"
+  },
+  "fixture": "fixtures/semantic-map",
+  "thresholds": {
+    "mappingSuccessRate": 0.95,
+    "falseMatchCount": 0
+  },
+  "summary": {
+    "eligibleDeclarations": 43,
+    "exact": 43,
+    "structural": 0,
+    "mappingSuccessRate": 1,
+    "falseMatchCount": 0,
+    "unmappedCount": 0,
+    "conflictCount": 0,
+    "scenarioPass": true
+  },
+  "byScenario": {
+    "T01": {
+      "eligible": 10,
+      "exact": 10,
+      "structural": 0,
+      "conflict": 0,
+      "unmapped": 0
+    },
+    "T02": {
+      "eligible": 3,
+      "exact": 3,
+      "structural": 0,
+      "conflict": 0,
+      "unmapped": 0
+    },
+    "T03": {
+      "eligible": 2,
+      "exact": 2,
+      "structural": 0,
+      "conflict": 0,
+      "unmapped": 0
+    },
+    "T04": {
+      "eligible": 5,
+      "exact": 5,
+      "structural": 0,
+      "conflict": 0,
+      "unmapped": 0
+    },
+    "T05": {
+      "eligible": 6,
+      "exact": 6,
+      "structural": 0,
+      "conflict": 0,
+      "unmapped": 0
+    },
+    "T06": {
+      "eligible": 5,
+      "exact": 5,
+      "structural": 0,
+      "conflict": 0,
+      "unmapped": 0
+    },
+    "T07": {
+      "eligible": 6,
+      "exact": 6,
+      "structural": 0,
+      "conflict": 0,
+      "unmapped": 0
+    },
+    "T08-same-root": {
+      "eligible": 2,
+      "exact": 2,
+      "structural": 0,
+      "conflict": 0,
+      "unmapped": 0
+    },
+    "T08-cross-package": {
+      "eligible": 4,
+      "exact": 4,
+      "structural": 0,
+      "conflict": 0,
+      "unmapped": 0
+    }
+  },
+  "unmappedReasons": {},
+  "sharedScipSymbols": [
+    {
+      "symbol": "scip-typescript npm semantic-map-fixture 0.0.0 src/t05-merge/`merged.ts`/Box#",
+      "declarations": [
+        "src/t05-merge/merged.ts:2:Box",
+        "src/t05-merge/merged.ts:6:Box"
+      ]
+    },
+    {
+      "symbol": "scip-typescript npm semantic-map-fixture 0.0.0 src/t06-overload/`overload.ts`/pick().",
+      "declarations": [
+        "src/t06-overload/overload.ts:2:pick",
+        "src/t06-overload/overload.ts:3:pick",
+        "src/t06-overload/overload.ts:4:pick"
+      ]
+    }
+  ],
+  "overloadOrdinals": [
+    {
+      "path": "src/t06-overload/overload.ts",
+      "line": 2,
+      "name": "pick",
+      "ordinal": 0
+    },
+    {
+      "path": "src/t06-overload/overload.ts",
+      "line": 3,
+      "name": "pick",
+      "ordinal": 1
+    },
+    {
+      "path": "src/t06-overload/overload.ts",
+      "line": 4,
+      "name": "pick",
+      "ordinal": 2
+    },
+    {
+      "path": "src/t06-overload/overload.ts",
+      "line": 8,
+      "name": "pickedString",
+      "ordinal": 0
+    },
+    {
+      "path": "src/t06-overload/overload.ts",
+      "line": 9,
+      "name": "pickedNumber",
+      "ordinal": 0
+    }
+  ],
+  "conflicts": [],
+  "unmapped": [],
+  "pass": true
+}

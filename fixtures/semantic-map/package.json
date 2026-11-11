@@ -1,0 +1,7 @@
+{
+  "name": "semantic-map-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 00 G1-G3 semantic mapping fixture (T01-T09)"
+}

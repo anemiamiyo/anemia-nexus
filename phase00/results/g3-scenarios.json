@@ -1,0 +1,112 @@
+{
+  "group": "G3",
+  "generatedAt": "2026-11-11T16:05:54.156Z",
+  "fixture": "fixtures/semantic-map",
+  "scenarios": {
+    "T02": {
+      "pass": true,
+      "assertions": {
+        "level1ResolvesToInternal": [
+          "src/t02-barrel/internal.ts:2"
+        ],
+        "level2ResolvesToInternal": [
+          "src/t02-barrel/internal.ts:2"
+        ],
+        "consumerResolvesToInternal": [
+          "src/t02-barrel/internal.ts:2"
+        ],
+        "sharedDeclarationCount": 1,
+        "everyHopPresent": true
+      }
+    },
+    "T03": {
+      "pass": true,
+      "assertions": {
+        "aliasIsAliasSymbol": true,
+        "aliasTarget": "original",
+        "aliasTargetDeclarations": [
+          "src/t03-alias/impl.ts:2"
+        ],
+        "renamedDeclarationCount": 0,
+        "referenceResolvesToOriginal": [
+          "src/t03-alias/impl.ts:2"
+        ]
+      }
+    },
+    "T04": {
+      "pass": true,
+      "assertions": {
+        "typeImportIsTypeOnly": true,
+        "valueImportIsTypeOnly": false,
+        "typeTarget": "Shape",
+        "valueTarget": "shape",
+        "distinctSymbols": true
+      }
+    },
+    "T05": {
+      "pass": true,
+      "assertions": {
+        "declarations": [
+          "src/t05-merge/merged.ts:2",
+          "src/t05-merge/merged.ts:6",
+          "src/t05-merge/merged.ts:10"
+        ],
+        "flags": 576,
+        "typeProperties": [
+          "a",
+          "b"
+        ],
+        "namespaceExports": [
+          "tag"
+        ],
+        "ambiguous": false
+      }
+    },
+    "T06": {
+      "pass": true,
+      "assertions": {
+        "overloadCount": 3,
+        "ordinals": [
+          0,
+          1,
+          2
+        ],
+        "stringCallResolvedLine": 2,
+        "numberCallResolvedLine": 3,
+        "scipSymbolShared": true,
+        "note": "SCIP 0.4.0 emits one symbol for all overloads; ordinals are supplied by the TS declaration layer."
+      }
+    },
+    "T08": {
+      "pass": true,
+      "assertions": {
+        "sameRootTarget": [
+          "src/t08-cross/lib/math.ts:2"
+        ],
+        "positiveCrossPackage": {
+          "allowed": true,
+          "reason": "allowed",
+          "fromPackage": "@fixture/app",
+          "dependency": "@fixture/ui",
+          "targetPackageJson": "D:\\anemia-nexus\\fixtures\\semantic-map\\packages\\ui\\package.json",
+          "exported": "./src/index.ts"
+        },
+        "negativeCrossPackage": {
+          "allowed": false,
+          "reason": "undeclared-dependency",
+          "fromPackage": "@fixture/app",
+          "dependency": "@fixture/private-lib",
+          "targetPackageJson": "D:\\anemia-nexus\\fixtures\\semantic-map\\packages\\private-lib\\package.json",
+          "exported": "./src/index.ts"
+        },
+        "tsconfigPathsResolveUndeclared": true,
+        "note": "tsconfig paths alone must not authorize a cross-package edge."
+      }
+    }
+  },
+  "summary": {
+    "total": 6,
+    "passed": 6,
+    "pass": true
+  }
+}
