@@ -1,7 +1,7 @@
 # Anemia Nexus
 
 > 以确定性索引为底座的**变更审计与 API 治理设施**，不是"更好的搜索工具"。
-> 当前状态：**Phase 00 已完成（11/11，其中 6 项为 pass-with-limit）；规范 v1.24 已冻结；Phase 01 未授权、未启动；产品功能仍未实现。**
+> 当前状态：**Phase 00 已完成（11/11，其中 6 项为 pass-with-limit）；规范 v1.24 已冻结；Phase 01 已实现 TS/TSX 索引与 CLI 骨架并通过 G1–G8，等待负责人评审；Vue / API Surface / 增量 / MCP 仍未实现。**
 
 ---
 
@@ -19,7 +19,7 @@ Anemia Nexus 的目标是把"变更影响、公共 API 差分、复用检测"变
 
 **完整性承诺的严格边界**：所谓"零漏报"仅适用于**确定性静态关系**（`relationClass = certain`），且仅在该文件位于索引范围内、分析成功完成时成立。启发式关系带置信度标注；动态关系明确不保证识别。**禁止把"未发现引用"表述为"确认不存在引用"。**
 
-以上能力当前均为**规划内容**。本仓库目前只有工程骨架、规范文档与 Phase 00 验证原型，**没有产品功能**。
+Phase 01 交付了上述能力中的第一个可运行切片：TS/TSX 的符号与引用索引、CLI 骨架、`status` / `doctor` 与最小查询面。Vue、API Surface、关系图、影响分析、增量与 MCP 仍是规划内容；未实现命令返回 E24「未提供」，不会伪造结果。
 
 ### 1.1 适用范围与前置条件
 
@@ -78,22 +78,22 @@ Anemia Nexus 的目标是把"变更影响、公共 API 差分、复用检测"变
 
 ## 3. 核心技术栈
 
-| 层          | 选型                                                                                | 状态                                        |
-| ----------- | ----------------------------------------------------------------------------------- | ------------------------------------------- |
-| 运行环境    | Node.js **≥ 22.16.0**（强制；低于即 E14 退出）                                      | 已配置 `engines` + `engine-strict`          |
-| 开发语言    | TypeScript **5.9.3**（锁定 5.x；`@vue/language-core` 不接受 TS 7.x）                | 已安装                                      |
-| 包管理      | npm workspaces                                                                      | 已配置                                      |
-| 构建        | tsup 8.5.1（ESM，`target: node20` 仅语法目标）                                      | 已配置并验证                                |
-| 测试        | Vitest 5.1.0                                                                        | 已配置；产品无测试，Phase 00 有独立验证脚本 |
-| 版本发布    | changesets 3.0.3                                                                    | 已安装，未启用发布流程                      |
-| 代码规范    | ESLint 10 + typescript-eslint + eslint-plugin-n；Prettier 3                         | 已配置并验证                                |
-| 索引存储    | 内置 `node:sqlite`（唯一驱动，禁止第三方）                                          | Phase 00 原型已验证；产品未接入             |
-| 语义分析    | `@sourcegraph/scip-typescript@0.4.0`；TS Compiler API；@vue/language-core / vue-tsc | 已安装；Phase 00 原型验证通过               |
-| 依赖 / 质量 | dependency-cruiser、Knip                                                            | 规划；尚未接入                              |
-| 配置校验    | Zod（JSON Schema 派生）                                                             | 已安装；Phase 00 安全原型验证               |
-| CLI / MCP   | Commander.js；`@modelcontextprotocol/server` v2                                     | MCP 协议探针通过；CLI 未实现                |
-| 并发保护    | proper-lockfile                                                                     | 已安装；调度为 Phase 00 模拟原型            |
-| 样式解析    | postcss 系（只提取字符串，不编译）                                                  | 规划；尚未接入                              |
+| 层          | 选型                                                                                | 状态                                         |
+| ----------- | ----------------------------------------------------------------------------------- | -------------------------------------------- |
+| 运行环境    | Node.js **≥ 22.16.0**（强制；低于即 E14 退出）                                      | 已配置 `engines` + `engine-strict`           |
+| 开发语言    | TypeScript **5.9.3**（锁定 5.x；`@vue/language-core` 不接受 TS 7.x）                | 已安装                                       |
+| 包管理      | npm workspaces                                                                      | 已配置                                       |
+| 构建        | tsup 8.5.1（ESM，`target: node20` 仅语法目标）                                      | 已配置并验证                                 |
+| 测试        | Vitest 5.1.0                                                                        | 已配置；产品无测试，Phase 00 有独立验证脚本  |
+| 版本发布    | changesets 3.0.3                                                                    | 已安装，未启用发布流程                       |
+| 代码规范    | ESLint 10 + typescript-eslint + eslint-plugin-n；Prettier 3                         | 已配置并验证                                 |
+| 索引存储    | 内置 `node:sqlite`（唯一驱动，禁止第三方）                                          | Phase 01 产品链路已接入并验证                |
+| 语义分析    | `@sourcegraph/scip-typescript@0.4.0`；TS Compiler API；@vue/language-core / vue-tsc | 已安装；Phase 00 原型验证通过                |
+| 依赖 / 质量 | dependency-cruiser、Knip                                                            | 规划；尚未接入                               |
+| 配置校验    | Zod（JSON Schema 派生）                                                             | 已安装；Phase 00 安全原型验证                |
+| CLI / MCP   | Commander.js；`@modelcontextprotocol/server` v2                                     | CLI 骨架已实现；MCP 协议探针通过、服务未实现 |
+| 并发保护    | proper-lockfile                                                                     | 已安装；调度为 Phase 00 模拟原型             |
+| 样式解析    | postcss 系（只提取字符串，不编译）                                                  | 规划；尚未接入                               |
 
 > **工程链兼容性**：tsup 9.0.0 的 `engines` 为 `^22.18.0 || ^24.11.0 || >=26.0.0`，会破坏 Node 22.16.0 下限矩阵，故固定 **tsup 8.5.1**；changesets 3.0.3 要求 npm ≥10.9.0（Node 22.16.0 自带 npm 10.9.2，满足）；ESLint 10 要求 Node ≥22.13，Vitest 5 / Vite 7 要求 ≥22.12。TypeScript 固定 5.9.3，满足 typescript-eslint 8 的 `>=4.8.4 <6.1.0` 约束。SCIP 固定 `@sourcegraph/scip-typescript@0.4.0`（TS 5.x）；最新的 0.6.x 依赖 TS 6 且要求 Node ≥22.23.4，升级须单独评审。
 >
@@ -120,8 +120,8 @@ anemia-nexus/
 │   └── local/                  # 用户本地真实项目（git 忽略）
 ├── phase00/                    # Phase 00 验证原型（非产品实现）
 ├── packages/
-│   ├── core/                   # anemia-core：索引/存储/查询（占位）
-│   ├── cli/                    # anemia-cli：CLI（占位，无 bin）
+│   ├── core/                   # anemia-core：扫描/配置/索引/存储/查询
+│   ├── cli/                    # anemia-cli：CLI（bin: nex/anex/anemia）
 │   ├── mcp/                    # anemia-mcp：MCP Server（占位）
 │   └── adapter-vue/            # anemia-adapter-vue：Vue 适配（占位）
 ├── eslint.config.js
@@ -132,8 +132,8 @@ anemia-nexus/
 └── README.md
 ```
 
-- `packages/*/src/index.ts` 目前只有占位注释与 `export {}`，**不含任何业务逻辑**。
-- `packages/cli` 尚未声明 `nex` / `anex` / `anemia` 的 `bin` 映射；按规范属于 Phase 01。
+- `packages/core` 与 `packages/cli` 已含 Phase 01 产品实现；`packages/mcp` 与 `packages/adapter-vue` 仍是占位入口。
+- `packages/cli` 已声明 `nex` / `anex` / `anemia` 三个 bin，指向同一份 `dist/main.js`。
 - `.nexus/`、`dist/`、`coverage/`、`node_modules/`、`fixtures/local/` 均不纳入版本控制。
 - `nexus.baseline.json` 规划纳入 git（尚未生成）。
 
@@ -168,7 +168,9 @@ anemia-nexus/
 | [`docs/appendix-a-d.md`](docs/appendix-a-d.md)                                                                  | 兼容矩阵、文档职责、冻结清单、修订对照                         |
 | [`docs/runtime-api.md`](docs/runtime-api.md)                                                                    | Node 内置 API 最低版本登记                                     |
 | [`docs/phase-01/00-freeze-and-entry.md`](docs/phase-01/00-freeze-and-entry.md)                                  | 规范冻结、负责人裁定与 Phase 01 入场条件                       |
-| [`docs/phase-01/01-task-checklist.md`](docs/phase-01/01-task-checklist.md)                                      | Phase 01 完整任务清单（仅计划，未启动）                        |
+| [`docs/phase-01/01-task-checklist.md`](docs/phase-01/01-task-checklist.md)                                      | Phase 01 完整任务清单（计划基线）                              |
+| [`docs/phase-01/02-plan-and-gates.md`](docs/phase-01/02-plan-and-gates.md)                                      | Phase 01 授权、Q-01/Q-02 裁定与冻结门槛                        |
+| [`docs/phase-01/03-implementation-report.md`](docs/phase-01/03-implementation-report.md)                        | Phase 01 实施报告、状态矩阵、gate 结论与已知限制               |
 
 文档职责：`docs/` 是技术规范唯一权威来源；本 README 只负责安装、运行、配置、上手与能力边界；`.dsh/AGENTS.md` 只负责 AI 协作纪律，不复制错误码表或工具用法全集。
 
@@ -216,9 +218,19 @@ npm run changeset      # 创建 changeset（发布流程尚未启用）
 npm run phase00        # Phase 00 全部验证（需要 Node 子进程权限）
 ```
 
-**当前没有可用的 `nex` 命令。** 第 11 章定义的 `nex init` / `build` / `status` / `mcp` 等全部属于后续阶段；现在执行 `npx nex` 会命中 npm 上同名的其他包，与本项目无关。Phase 01 建立 CLI 骨架后才会提供 bin 映射。
+**Phase 01 已提供 `nex` / `anex` / `anemia` 命令（构建后）：**
 
-本项目是 Node 库与 CLI，不是前端应用，**没有常驻 dev server**；初始化阶段也没有可启动的 CLI。开发期使用 `npm run test:watch`、编辑器类型检查与 `npm run build` 产物检查；Phase 01 建立 CLI 骨架后才提供 `nex` 可执行入口。
+```bash
+npm run build
+node packages/cli/dist/main.js init --roots all --write-config --yes
+node packages/cli/dist/main.js build
+node packages/cli/dist/main.js status
+node packages/cli/dist/main.js references <symbol>
+```
+
+已实现：`init`、`build`、`status`、`doctor`、`symbol`、`references`、`search`；`query` 为 `search` 的兼容别名。其余命令（`update`、`deps`、`impact`、`context`、`api-snapshot`、`api-diff`、`similar`、`audit-duplicates`、`preflight`、`postflight`、`verify`、`print`、`mcp`、`test`）在 Phase 01 返回 E24「未提供」，退出码 1。
+
+本项目是 Node 库与 CLI，不是前端应用，**没有常驻 dev server**。开发期使用 `npm run test:watch`、编辑器类型检查、`npm run build` 与 `node packages/cli/dist/main.js`；CLI 不启动任何后台常驻进程。
 
 ### 7.1 安装后的手动接入（规划；`nex` 尚未实现）
 
@@ -245,6 +257,9 @@ npm run phase00        # Phase 00 全部验证（需要 Node 子进程权限）
 - [x] 落地 **Apache-2.0** 许可证与 NOTICE；根与 4 个子包写入 `license` 字段。
 - [x] 完成 **Phase 00**：11 项验证全部退出码 0，证据写入 `phase00/results/`，报告见 [`docs/phase-00/02-validation-report.md`](docs/phase-00/02-validation-report.md)。
 - [x] 建立 Phase 00 夹具：`fixtures/semantic-map`（T01–T09）、`fixtures/F15-identity`（八场景）。
+- [x] 完成 **Phase 01**：CLI 骨架与 `init` / `build` / `status` / `doctor` / `symbol` / `references` / `search`；Zod JSON 配置与授权 TS 配置子进程；root 探测与隔离扫描；SCIP 0.4.0 + `node:sqlite` 的 TS/TSX 索引；四格式输出、退出码与错误码框架。
+- [x] 建立 Phase 01 夹具：`fixtures/F01-reexport-chain`、`fixtures/F10-negative`、`fixtures/F17-config-security`、`fixtures/F04-multi-root`，以及独立 tsserver Oracle（`tools/oracle/`）。
+- [x] 双 Node 验证：Node 22.16.0 与 24.22.2 下 build / typecheck / 52 项测试 / CLI 基础链路全部通过。
 
 ### 8.2 Phase 00 验证结果
 
@@ -262,16 +277,31 @@ npm run phase00        # Phase 00 全部验证（需要 Node 子进程权限）
 | G10 全量/增量       | pass-with-limit | 10/10 字段相等；复用 12/20 文件                                                                  |
 | MCP 协议探针        | pass            | 双 Node 版本 initialize → tools/list → echo；协议 2025-11-25                                     |
 
-工程检查仍通过：`npm run typecheck`、`npm run lint`、`npm run build`、`npm run format:check`；`npm test` 仍为“无产品测试”。**Phase 00 的 pass-with-limit 限制必须与结果一起引用，不能只写“通过”。**
+工程检查仍通过：`npm run typecheck`、`npm run lint`、`npm run build`、`npm run format:check`、`npm test`（52 项）。**Phase 00 的 pass-with-limit 限制必须与结果一起引用，不能只写“通过”。**
+
+### 8.2.1 Phase 01 验证结果
+
+| Gate          | 结果 | 关键证据                                                                                                 |
+| ------------- | ---- | -------------------------------------------------------------------------------------------------------- |
+| G1 构建       | pass | Node 22.16.0 / 24.22.2 下 build、typecheck、lint、format:check 退出 0；连续两次构建产物哈希一致          |
+| G2 单仓库索引 | pass | F01 上 `init` + `build` 退出 0，生成独立 root 索引与 manifest                                            |
+| G3 引用正确性 | pass | F01 20 个公共符号、F10 11 个公共符号与 tsserver Oracle 全量对照，0 漏报 / 0 误报                         |
+| G4 输出一致   | pass | F01 `references add` 的 pretty / lines / json / markdown 条目数一致，均为 7；lines/json/markdown 无 ANSI |
+| G5 非 TTY     | pass | 无输入管道下所有命令 5s 内退出；缺参数 64；`--yes` 路径成功                                              |
+| G6 配置安全   | pass | F17 未授权 E18、越界读写/网络/子进程被拒；项目 scripts 未执行；恶意命令 E17                              |
+| G7 双 Node    | pass | 22.16.0 / 24.22.2 的 build、typecheck、52 项测试、CLI 基础链路                                           |
+| G8 自审       | pass | 实施报告、测试证据、已知问题、自审回执齐全；工作区无验证残留                                             |
+
+完整报告见 [`docs/phase-01/03-implementation-report.md`](docs/phase-01/03-implementation-report.md)。
 
 ### 8.3 明确未完成
 
-- **未进入 Phase 01**；没有 CLI 命令、CLI bin 映射、索引器、查询层、生产存储层或 8 个 MCP 工具。
-- `packages/*/src` 仍是占位入口；`phase00/` 是验证原型，不是产品实现。
-- 未生成 `nexus.baseline.json`、`nexus.config.json`、`.nexus/` 索引。
-- 未建立完整 F01–F18 夹具集（只有 Phase 00 的 semantic-map 与 F15）。
-- 未执行 npm 发布验证（`npm pack` 12 项），未启用 changesets 发布。
-- G7 未包含 SCIP 峰值；G5 未使用真实 kill -9；G8 内存压力为模拟；G9 非 OS 级网络沙箱；G10 边为全局重算；百万行档按负责人批准未验证。
+- **未进入 Phase 02**；Vue 语义与模板边、API Surface、依赖/调用图、impact、增量、MCP 8 工具、`print` 物料、`doctor --repair` 均未实现。
+- `packages/mcp` / `packages/adapter-vue` 仍是占位入口；未生成 `nexus.baseline.json`。
+- 多 root 的 `symbol` / `references` 查询返回 E24；`status --json-schema` 返回 E24；`--pager` 不启动外部分页器。
+- 未执行发布验证（`npm pack` 12 项）与 changesets 发布流程；包仍为 `private: true`。
+- SCIP 子进程峰值 RSS 未采集（`scipPeakRssMB: null` 并带原因）；G5 未使用真实 kill -9；G8 内存压力为模拟；G9 非 OS 级网络沙箱；G10 边为全局重算；百万行档按负责人批准未验证。
+- Phase 01 的 `update` 明确未提供，不实现、不宣称增量能力。
 
 ---
 
@@ -279,18 +309,18 @@ npm run phase00        # Phase 00 全部验证（需要 Node 子进程权限）
 
 阶段划分与门禁以 [`docs/19-delivery-phases.md`](docs/19-delivery-phases.md) 为准：
 
-| 阶段 | 名称                 | 进入条件                                                  |
-| ---- | -------------------- | --------------------------------------------------------- |
-| 00   | 可行性验证与定位校验 | **已完成**（11/11，含 6 项 pass-with-limit）              |
-| 01   | 骨架与 TS 索引       | 规范冻结后，经项目负责人明确授权；Phase 00 限制已完成评审 |
-| 02   | Vue 语义与引用查询   | Phase 01 通过；Vue 投影、语义合并、模板边                 |
-| 03   | API Surface 与基线   | Phase 02 通过                                             |
-| 04   | 关系图与架构分析     | Phase 03 通过                                             |
-| 05   | 影响分析与审计       | Phase 04 通过                                             |
-| 06   | 增量、性能与一致性   | Phase 05 通过                                             |
-| 07   | 复用性、MCP 与交付   | Phase 06 通过                                             |
+| 阶段 | 名称                 | 进入条件                                     |
+| ---- | -------------------- | -------------------------------------------- |
+| 00   | 可行性验证与定位校验 | **已完成**（11/11，含 6 项 pass-with-limit） |
+| 01   | 骨架与 TS 索引       | **已完成实现，G1–G8 pass，等待负责人评审**   |
+| 02   | Vue 语义与引用查询   | Phase 01 通过；Vue 投影、语义合并、模板边    |
+| 03   | API Surface 与基线   | Phase 02 通过                                |
+| 04   | 关系图与架构分析     | Phase 03 通过                                |
+| 05   | 影响分析与审计       | Phase 04 通过                                |
+| 06   | 增量、性能与一致性   | Phase 05 通过                                |
+| 07   | 复用性、MCP 与交付   | Phase 06 通过                                |
 
-**Phase 00 的结论具有否决权**：任一 P0 项无法验证通过，必须停止并提交架构调整申请，不得"先做着看"。Phase 00 已完成；**Phase 01 未启动，本仓库不会自动进入 Phase 01**。
+**Phase 00 的结论具有否决权**：任一 P0 项无法验证通过，必须停止并提交架构调整申请，不得"先做着看"。Phase 00 与 Phase 01 均已完成实现；**Phase 01 尚未通过负责人评审，本仓库不会自动进入 Phase 02**。
 
 未来接入顺序（工具实现后，按 21.1）：安装 → 手动接入（MCP / AGENTS.md / Skill）→ `nex init` → `nex build` → `nex status`。工具只打印接入物料，不代写任何配置文件。
 
@@ -327,7 +357,17 @@ Phase 00 验证只在合成夹具中执行了受限配置与恶意用例；未�
 
 ## 12. 已知限制与待确认事项
 
-规范本身状态为**待冻结评审**：冻结前不得进入 Phase 01。Phase 00 已按授权完成，完整限制见 [`docs/phase-00/02-validation-report.md`](docs/phase-00/02-validation-report.md)。
+规范 v1.24 已冻结。Phase 00 与 Phase 01 的完整限制分别见 [`docs/phase-00/02-validation-report.md`](docs/phase-00/02-validation-report.md) 与 [`docs/phase-01/03-implementation-report.md`](docs/phase-01/03-implementation-report.md)。
+
+Phase 01 新增加的限制：
+
+- 多 root 查询面不完整：`symbol` / `references` 仅支持单 root，多 root 返回 E24；`search --roots all` 可用。
+- `status --json-schema`、`doctor --repair` / `--mcp` / `--dump-vue-map`、`print`、`mcp`、`update` 均返回 E24。
+- SCIP 子进程峰值 RSS 不可观测，manifest 记录 `scipPeakRssMB: null` 与原因；不得把父进程 RSS 当作 SCIP 峰值。
+- 真实增量、失效传播、五态状态机的 `dirty` / `indexing` 运行期转换未实现；Phase 01 只有全量 build 与提交/恢复基础。
+- TS 配置只支持可擦除语法；enum / namespace 值可能加载失败。持久授权 `.nexus/trust.json` 只读取，Phase 01 未提供写入口（`--trust-config` 仅本次进程）。
+- `--pager` 不启动外部分页器；`--budget-hint` 只记录，不做裁剪；默认不做分页（无静默截断）。
+- Node 24.22.2 通过从 npm `node` 包下载的独立二进制验证，未修改项目依赖或用户全局配置。
 
 规范第 0.3 节事项的当前状态：
 
@@ -349,9 +389,9 @@ Phase 00 新增的限制（必须在 Phase 01 前评审）：
 
 待确认：
 
-- 是否进入规范冻结评审与 Phase 01（**当前不启动**）。
+- Phase 01 是否通过负责人评审并进入 Phase 02（**当前不进入**）。
 - 4 个 workspace 包仍为 `private: true`；Phase 07 发布前需按 changesets 流程调整。
-- 是否需要在本轮 Phase 00 变更后创建新的 commit（当前工作区有未提交的 Phase 00 文件）。
+- `npm ci` 基线检查未在本机执行（Node 22.16.0 自带 npm 10.9.2 缺少 `@npmcli/config`；使用同机 npm 10.9.3 CLI 完成安装），记录在 Phase 01 报告中。
 
 如发现文档冲突、关键配置缺失或规范无法落实，应按 [`docs/20-prohibitions.md`](docs/20-prohibitions.md) 的 20.6 提交《架构问题报告》，**不得自行作出架构级决策**。
 

@@ -10,18 +10,27 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/main.d.ts",
+      "import": "./dist/main.js"
     }
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/main.js",
+  "types": "./dist/main.d.ts",
   "files": [
     "dist"
   ],
   "sideEffects": false,
+  "bin": {
+    "nex": "./dist/main.js",
+    "anex": "./dist/main.js",
+    "anemia": "./dist/main.js"
+  },
+  "dependencies": {
+    "anemia-core": "0.0.0",
+    "commander": "15.1.0"
+  },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --target node20 --dts --clean",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p ../../tsconfig.typecheck.json"
   }
 }

@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "anemia-core": ["packages/core/src/index.ts"]
+    },
+    "noEmit": true
+  },
+  "include": [
+    "packages/core/src/**/*.ts",
+    "packages/cli/src/**/*.ts",
+    "packages/mcp/src/**/*.ts",
+    "packages/adapter-vue/src/**/*.ts"
+  ]
+}

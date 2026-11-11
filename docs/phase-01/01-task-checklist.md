@@ -2,7 +2,7 @@
 
 > 生成日期：2026-11-12（Asia/Shanghai）
 > 依据：`docs/19-delivery-phases.md` 阶段 01、`docs/02-technical-baseline.md`、`docs/05-data-model.md`、`docs/11-cli.md`、`docs/12-indexing.md`、`docs/15-output-contract.md`、`docs/16-nfr-and-errors.md`、`docs/17-testing.md`、`docs/18-security.md`
-> 状态：**仅计划，Phase 01 未启动、未授权。**
+> 状态：**仅计划基线；2026-11-12 已授权并完成实现，实际状态见 `03-implementation-report.md`（本清单未逐项回填）。**
 > 本清单不是开工指令；开始任何一项前，必须满足 `docs/phase-01/00-freeze-and-entry.md` 的入场条件。
 
 ## 0. 使用规则

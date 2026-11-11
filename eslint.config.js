@@ -18,6 +18,10 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    files: ['tools/**/*.mjs'],
+    languageOptions: { globals: { process: 'readonly' } },
+  },
+  {
     files: ['**/*.ts'],
     plugins: {
       n,
@@ -25,7 +29,11 @@ export default tseslint.config(
     rules: {
       // Runtime floor is Node 22.16.0 (docs/02-technical-baseline.md 2.2).
       // Any new Node built-in API must also be registered in docs/runtime-api.md.
-      'n/no-unsupported-features/node-builtins': ['error', { version: '22.16.0' }],
+      // node:sqlite is required by the spec and remains flagged experimental in Node 22.16.
+      'n/no-unsupported-features/node-builtins': [
+        'error',
+        { version: '22.16.0', ignores: ['sqlite'] },
+      ],
     },
   },
 );

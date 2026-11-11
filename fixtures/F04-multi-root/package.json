@@ -1,0 +1,7 @@
+{
+  "name": "f04-multi-root",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"]
+}

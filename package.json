@@ -12,9 +12,9 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "vitest run --passWithNoTests",
+    "build": "npm run build -w anemia-core && npm run build -w anemia-cli && npm run build -w anemia-mcp && npm run build -w anemia-adapter-vue",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "test": "vitest run",
     "test:watch": "vitest",
     "phase00": "node phase00/run-all.mjs",
     "lint": "eslint .",

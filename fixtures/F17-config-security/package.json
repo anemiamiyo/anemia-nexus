@@ -1,0 +1,11 @@
+{
+  "name": "f17-config-security",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare": "node -e \"require('node:fs').writeFileSync('prepare-ran.txt', 'bad')\"",
+    "postinstall": "node -e \"require('node:fs').writeFileSync('postinstall-ran.txt', 'bad')\"",
+    "build": "node -e \"require('node:fs').writeFileSync('build-ran.txt', 'bad')\""
+  }
+}
