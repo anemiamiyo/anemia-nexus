@@ -20,6 +20,7 @@ import {
   requiredIndexesPresent,
 } from './store/db.js';
 import { databasePath, manifestPath, readManifest, rootDirectory } from './store/manifest.js';
+import { readSurface } from './surface/store.js';
 import { SCHEMA_VERSION } from './store/schema.js';
 
 export type CheckStatus = 'pass' | 'warn' | 'fail';
@@ -235,6 +236,39 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
         },
       ),
     );
+
+    const surfaceRead = readSurface(projectRoot, root.rootId);
+    if (manifest.surfaceHash === undefined) {
+      checks.push(
+        check(
+          `surface:${root.rootId}`,
+          `API Surface (${root.rootId})`,
+          'warn',
+          'this index predates Phase 03; rebuild to generate surface.json',
+          { suggestion: 'Run `nex build` to generate the Surface snapshot.' },
+        ),
+      );
+    } else if (surfaceRead.surface === null || !surfaceRead.matchesManifest) {
+      checks.push(
+        check(
+          `surface:${root.rootId}`,
+          `API Surface (${root.rootId})`,
+          'warn',
+          surfaceRead.error ?? 'surface.json does not match the manifest build',
+          { suggestion: 'Run `nex build` to regenerate surface.json.' },
+        ),
+      );
+    } else {
+      checks.push(
+        check(
+          `surface:${root.rootId}`,
+          `API Surface (${root.rootId})`,
+          'pass',
+          `${surfaceRead.surface.entries.length} public entries, hash ${surfaceRead.surface.surfaceHash.slice(0, 12)}`,
+          { evidence: { surfaceHash: surfaceRead.surface.surfaceHash } },
+        ),
+      );
+    }
 
     const dbPath = databasePath(projectRoot, root.rootId);
     if (!fs.existsSync(dbPath)) {

@@ -18,6 +18,7 @@ export interface ManifestTimings {
   scipMs: number;
   mapMs: number;
   writeMs: number;
+  writeBatches: number;
   totalMs: number;
 }
 
@@ -48,6 +49,8 @@ export interface RootManifest {
   };
   coverage: ManifestCoverage;
   vue?: VueAnalysisSummary;
+  surfaceHash?: string;
+  surfaceEntries?: number;
   stats: {
     exact: number;
     structural: number;

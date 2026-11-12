@@ -19,6 +19,7 @@ export const CAPABILITIES = {
   htmlFileRef: 'experimental-off',
   vue: 'sfc-semantic',
   templateReferences: ['component-use', 'template-binding', 'interpolation'],
+  apiSurface: 'evidence-sources',
   incremental: false,
   mcpFormats: [] as string[],
   dynamicUnresolved: 'marked',
@@ -49,6 +50,8 @@ export interface RootStatus {
   references: number;
   buildFingerprint: string | null;
   buildFingerprintPrefix: string | null;
+  surfaceHash: string | null;
+  surfaceEntries: number;
   degraded: string[];
   coverage: Coverage;
   vue: VueAnalysisSummary | null;
@@ -286,6 +289,8 @@ export async function statusReport(options: StatusOptions): Promise<StatusReport
         references: 0,
         buildFingerprint: null,
         buildFingerprintPrefix: null,
+        surfaceHash: null,
+        surfaceEntries: 0,
         degraded: [],
         coverage: { ...EMPTY_COVERAGE },
         vue: null,
@@ -360,6 +365,8 @@ export async function statusReport(options: StatusOptions): Promise<StatusReport
       buildFingerprint: manifest.buildFingerprint || null,
       buildFingerprintPrefix:
         manifest.buildFingerprint === '' ? null : manifest.buildFingerprint.slice(0, 12),
+      surfaceHash: manifest.surfaceHash ?? null,
+      surfaceEntries: manifest.surfaceEntries ?? 0,
       degraded: Array.isArray(manifest.degraded) ? manifest.degraded : [],
       coverage: {
         ...EMPTY_COVERAGE,

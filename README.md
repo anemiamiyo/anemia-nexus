@@ -1,7 +1,7 @@
 # Anemia Nexus
 
 > 以确定性索引为底座的**变更审计与 API 治理设施**，不是"更好的搜索工具"。
-> 当前状态：**Phase 00 已完成（11/11，其中 6 项为 pass-with-limit）；规范 v1.24 已冻结；Phase 01 已以 pass-with-limits 关闭并由负责人批准进入 Phase 02；Phase 02（Vue 语义与引用查询）已实现并通过 V1–V4 / V6，等待负责人评审；API Surface / 关系图 / 增量 / MCP 仍未实现。**
+> 当前状态：**Phase 00 已完成（11/11，其中 6 项为 pass-with-limit）；规范 v1.24 已冻结；Phase 01 以 pass-with-limits 关闭；Phase 02（Vue 语义与引用查询）以 pass 关闭并获准进入 Phase 03；Phase 03（API Surface 与基线）已实现，正在等待负责人评审；关系图 / 影响分析 / 增量 / MCP 仍未实现。**
 
 ---
 
@@ -19,7 +19,7 @@ Anemia Nexus 的目标是把"变更影响、公共 API 差分、复用检测"变
 
 **完整性承诺的严格边界**：所谓"零漏报"仅适用于**确定性静态关系**（`relationClass = certain`），且仅在该文件位于索引范围内、分析成功完成时成立。启发式关系带置信度标注；动态关系明确不保证识别。**禁止把"未发现引用"表述为"确认不存在引用"。**
 
-Phase 01 交付了 TS/TSX 的符号与引用索引、CLI 骨架、`status` / `doctor` 与最小查询面，并已由负责人以 pass-with-limits 关闭；Phase 02 在其上增加 Vue 3 SFC 语义：`@vue/language-core` 投影、影子物化、坐标转译、`__VLS_` 过滤、Props/Emits/Slots 与 `propsCoverage`、四类模板引用边，以及 scip / ts / vue 三引擎的 `symbol_map`。API Surface、关系图、影响分析、增量与 MCP 仍是规划内容；未实现命令返回 E24「未提供」，不会伪造结果。
+Phase 01 交付了 TS/TSX 的符号与引用索引、CLI 骨架、`status` / `doctor` 与最小查询面，并已由负责人以 pass-with-limits 关闭；Phase 02 增加 Vue 3 SFC 语义：`@vue/language-core` 投影、影子物化、坐标转译、`__VLS_` 过滤、Props/Emits/Slots 与 `propsCoverage`、四类模板引用边，以及 scip / ts / vue 三引擎的 `symbol_map`。Phase 03 增加 API Surface：五类公开证据来源（`package-exports` / `explicit-entry` / `barrel-derived` / `manual-override` / `none`）、`exportKind`、`nexus.baseline.json`、`api-snapshot`、`api-diff` 四级差分与 `@deprecated` 链路；构建写入改为单事务、迭代器分批的边算边写。关系图、影响分析、增量与 MCP 仍是规划内容；未实现命令返回 E24「未提供」，不会伪造结果。
 
 ### 1.1 适用范围与前置条件
 
@@ -44,13 +44,13 @@ Phase 01 交付了 TS/TSX 的符号与引用索引、CLI 骨架、`status` / `do
 
 ## 2. 主要功能与明确的非目标
 
-### 2.1 主要功能与规划阶段（TS/Vue 索引与检索已在 Phase 01/02 实现；其余未实现）
+### 2.1 主要功能与规划阶段（TS/Vue 索引、检索与 API Surface 已实现；其余未实现）
 
 | 能力                             | 说明                                                                                                        | 规划阶段 |
 | -------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------- |
 | 确定性索引                       | TypeScript / TSX / Vue 3 SFC；SCIP 为主、TS Compiler API 校验、Vue Language Core 投影                       | 01–02    |
 | 代码检索                         | 符号、类型、文件、目录、导出、签名、组件 Props/Emits/Slots、引用、JSON/配置、示例与测试、废弃 API、身份历史 | 01–02    |
-| API Surface 治理                 | 公共/内部/opaque 分类、公开证据来源、基线快照、语义化差分、弃用链路                                         | 03       |
+| API Surface 治理                 | 公共/内部/opaque 分类、公开证据来源、基线快照、语义化差分、弃用链路（Phase 03 已实现）                      | 03       |
 | 关系分析                         | 文件/模块依赖、符号引用、导出重导出、静态调用、组件关系、测试关联；三分类 + 四档置信度                      | 04       |
 | 变更影响分析                     | 直接/间接依赖者、受影响 Surface/组件/类型/测试、盲区清单、风险等级                                          | 05       |
 | Preflight / Postflight / CI 门禁 | 变更前审计、变更后审计、退出码门禁                                                                          | 05       |
@@ -136,7 +136,7 @@ anemia-nexus/
 - `packages/core` 与 `packages/cli` 已含 Phase 01 产品实现；`packages/mcp` 与 `packages/adapter-vue` 仍是占位入口。
 - `packages/cli` 已声明 `nex` / `anex` / `anemia` 三个 bin，指向同一份 `dist/main.js`。
 - `.nexus/`、`dist/`、`coverage/`、`node_modules/`、`fixtures/local/` 均不纳入版本控制。
-- `nexus.baseline.json` 规划纳入 git（尚未生成）。
+- `nexus.baseline.json` 由 `nex api-snapshot --yes` 生成，纳入 git 后供 `api-diff` 使用。
 
 ---
 
@@ -176,6 +176,10 @@ anemia-nexus/
 | [`docs/phase-02/01-task-checklist.md`](docs/phase-02/01-task-checklist.md)                                      | Phase 02 完整任务清单（计划基线）                              |
 | [`docs/phase-02/02-plan-and-gates.md`](docs/phase-02/02-plan-and-gates.md)                                      | Phase 02 gate、V1–V4/V6 口径、测试矩阵与风险                   |
 | [`docs/phase-02/03-implementation-report.md`](docs/phase-02/03-implementation-report.md)                        | Phase 02 实施报告、证据、已知限制与自审回执                    |
+| [`docs/phase-03/00-entry-and-decisions.md`](docs/phase-03/00-entry-and-decisions.md)                            | Phase 03 授权、Surface 分工、基线与 diff 口径、边算边写裁定    |
+| [`docs/phase-03/01-task-checklist.md`](docs/phase-03/01-task-checklist.md)                                      | Phase 03 完整任务清单与证据要求                                |
+| [`docs/phase-03/02-plan-and-gates.md`](docs/phase-03/02-plan-and-gates.md)                                      | Phase 03 gate、量化口径、测试矩阵与风险                        |
+| [`docs/phase-03/03-implementation-report.md`](docs/phase-03/03-implementation-report.md)                        | Phase 03 实施报告、证据、已知限制与自审回执                    |
 
 文档职责：`docs/` 是技术规范唯一权威来源；本 README 只负责安装、运行、配置、上手与能力边界；`.dsh/AGENTS.md` 只负责 AI 协作纪律，不复制错误码表或工具用法全集。
 
@@ -214,7 +218,7 @@ npm install --cache ./.npm-cache
 npm install            # 安装 workspace 依赖并生成/使用 package-lock.json
 npm run build          # tsup 构建全部 packages（ESM + d.ts，target node20）
 npm run typecheck      # tsc --noEmit，逐 package
-npm test               # Vitest；58 项（Phase 02）
+npm test               # Vitest；73 项（Phase 03）
 npm run test:watch     # Vitest watch
 npm run lint           # ESLint，含 Node 22.16.0 内置 API 越界检查
 npm run format         # Prettier 写入
@@ -236,7 +240,7 @@ node packages/cli/dist/main.js symbol <component-symbolId>
 node packages/cli/dist/main.js doctor --dump-vue-map src/App.vue   # 打印投影与映射段，不落盘
 ```
 
-已实现：`init`、`build`、`status`、`doctor`（含 `--schema`、`--dump-vue-map`）、`symbol`、`references`、`search`；`query` 为 `search` 的兼容别名。其余命令（`update`、`deps`、`impact`、`context`、`api-snapshot`、`api-diff`、`similar`、`audit-duplicates`、`preflight`、`postflight`、`verify`、`print`、`mcp`、`test`）仍返回 E24「未提供」，退出码 1；`doctor --repair` / `--mcp`、`status --json-schema` 同样仍为 E24。
+已实现：`init`、`build`、`status`、`doctor`（含 `--schema`、`--dump-vue-map`）、`symbol`、`references`、`search`、`api-snapshot`、`api-diff`；`query` 为 `search` 的兼容别名。其余命令（`update`、`deps`、`impact`、`context`、`similar`、`audit-duplicates`、`preflight`、`postflight`、`verify`、`print`、`mcp`、`test`）仍返回 E24「未提供」，退出码 1；`doctor --repair` / `--mcp`、`status --json-schema` 同样仍为 E24。
 
 本项目是 Node 库与 CLI，不是前端应用，**没有常驻 dev server**。开发期使用 `npm run test:watch`、编辑器类型检查、`npm run build` 与 `node packages/cli/dist/main.js`；CLI 不启动任何后台常驻进程。
 
@@ -270,7 +274,10 @@ node packages/cli/dist/main.js doctor --dump-vue-map src/App.vue   # 打印投�
 - [x] 双 Node 验证：Node 22.16.0 与 24.22.2 下 build / typecheck / 52 项测试 / CLI 基础链路全部通过。
 - [x] 完成 **Phase 02**：`@vue/language-core@3.3.14` SFC 投影、`.nexus/tmp/vue/` 影子物化与内存映射、shadow → `.vue` 坐标转译、`__VLS_` 内部符号过滤、Props/Emits/Slots 与 `propsCoverage`、四类模板引用边、Semantic Merger 与 `symbol_map`（scip / ts / vue）、`doctor --dump-vue-map`。
 - [x] 建立 Phase 02 夹具：`fixtures/F05-vue-sfc`（5 个 SFC、23 条模板边、9 个 Props、4 类边与动态参数/成员表达式），并扩展 `fixtures/semantic-map` 的 T09 断言。
-- [x] 阶段 02 gate：V1–V4、V6 自动化断言通过；`npm test` 58 项；Vue 符号 0 `__VLS_` 泄漏；`falseMatchCount = 0`。完整证据见 [`docs/phase-02/03-implementation-report.md`](docs/phase-02/03-implementation-report.md)。
+- [x] 阶段 02 gate：V1–V4、V6 自动化断言通过；Vue 符号 0 `__VLS_` 泄漏；`falseMatchCount = 0`。完整证据见 [`docs/phase-02/03-implementation-report.md`](docs/phase-02/03-implementation-report.md)。
+- [x] 完成 **Phase 03**：Surface 五类证据与优先级、`exportKind`/`isTypeOnly`/`runtimePresent`、按 root 的 `surface.json`、`nexus.baseline.json`、`api-snapshot`、`api-diff`（breaking/additive/internal/ambiguous）、`@deprecated` 继任者链路、F07 夹具。
+- [x] 负责人指定遗留补齐：SQLite 单事务 + 迭代器分批边算边写，移除 `references.map` / `mappingRows` / `qualityBySymbolId` 全量副本，历史表改为 SQL 临时表；`writeBatches` 写入 manifest。
+- [x] Phase 03 验证：`npm test` 73 项；F07 evidenceSource/exportKind 覆盖率 100%；反向误报 0；基线两次逐字节一致；`act -j verify --container-options "-m 4g" --action-offline-mode` 结果见报告。
 
 ### 8.2 Phase 00 验证结果
 
@@ -320,10 +327,26 @@ node packages/cli/dist/main.js doctor --dump-vue-map src/App.vue   # 打印投�
 | G9 回归        | pass | F01/F10/F15/F17 既有 52 项 + 新增 6 项全绿；`update` / `status --json-schema` 仍 E24             |
 | G10 自审       | pass | 报告、证据、已知问题、自审回执齐全；工作区无验证残留                                             |
 
+### 8.2.3 Phase 03 验证结果
+
+| Gate              | 结果 | 关键证据                                                                                                                                                                       |
+| ----------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| G0 边算边写       | pass | `BuildWriter` 单事务 + 迭代器分批；`references.map` / `mappingRows` / `qualityBySymbolId` 全量副本移除；历史表 SQL 临时表；F07 `writeBatches=1`，writer 测试 1200 行/回滚      |
+| G1 构建           | pass | `npm run build`、`typecheck`、`lint`、`format:check` 退出 0                                                                                                                    |
+| G2 Surface 完整性 | pass | F07 33 条 public 记录，`primaryEvidenceSource` / `exportKind` 覆盖率 100%；internal 不进入 public                                                                              |
+| G3 证据与优先级   | pass | 条件 `types/import/require`、子路径 `./utils`、通配 `./advanced/feature`、多层 barrel、manual override 均有断言                                                                |
+| G4 快照           | pass | 同 fingerprint 两次 `nexus.baseline.json` 逐字节一致；证据来源变化后 `surfaceHash` 必变；无时间戳/行号/绝对路径                                                                |
+| G5 差分           | pass | breaking / additive / internal / ambiguous 各 ≥1；`--fail-on` 命中 1、仅 ambiguous 警告 2、干净 0                                                                              |
+| G6 弃用           | pass | `oldAdd` resolved 到 `add`；`doomed` no-successor + removalVersion；deprecated 删除仍 breaking                                                                                 |
+| G7 回归           | pass | `npm test` 73 项；F01/F05/F10/F15/F17 不回归；`update` / `status --json-schema` 仍 E24                                                                                         |
+| G8 输出           | pass | 四格式同源；无 ANSI / 绝对路径 / 时间戳；lines/json 稳定                                                                                                                       |
+| G9 act CI         | pass | `act -j verify --container-options "-m 4g" --action-offline-mode`：Node 22.16.0 与 24.22.3 两个矩阵各 73 项通过（首次不加 `--action-offline-mode` 因 GitHub 连接失败，见报告） |
+| G10 自审          | pass | 报告、任务回填、已知限制、自审回执齐全；工作区仅负责人 `.actrc` 与本轮变更                                                                                                     |
+
 ### 8.3 明确未完成
 
-- **Phase 02 已完成实现，等待负责人评审；尚未进入 Phase 03**。API Surface、依赖/调用图、impact、增量、MCP 8 工具、`print` 物料、`doctor --repair` 均未实现。
-- `packages/mcp` / `packages/adapter-vue` 仍是占位入口；未生成 `nexus.baseline.json`。
+- **Phase 03 已实现，等待负责人评审；尚未进入 Phase 04**。依赖/调用图、impact、增量、MCP 8 工具、`print` 物料、`doctor --repair` 均未实现。
+- `packages/mcp` / `packages/adapter-vue` 仍是占位入口；`nexus.baseline.json` 由项目按需生成并提交，本仓库根未提交默认基线。
 - 多 root 的 `symbol` / `references` 查询返回 E24；`status --json-schema` 返回 E24；`--pager` 不启动外部分页器。
 - Vue 语义仅覆盖 Phase 02 范围：真实 TS 文件 import `.vue` 的跨语言边可能缺失；复杂 Props / Slot 未解析时显式 heuristic；`vue.typeResolver` 不执行；`update` 仍 E24。
 - 未执行发布验证（`npm pack` 12 项）与 changesets 发布流程；包仍为 `private: true`。
@@ -339,14 +362,14 @@ node packages/cli/dist/main.js doctor --dump-vue-map src/App.vue   # 打印投�
 | ---- | -------------------- | -------------------------------------------- |
 | 00   | 可行性验证与定位校验 | **已完成**（11/11，含 6 项 pass-with-limit） |
 | 01   | 骨架与 TS 索引       | **已关闭**（pass-with-limits，负责人接受）   |
-| 02   | Vue 语义与引用查询   | **已实现，V1–V4/V6 通过，等待负责人评审**    |
-| 03   | API Surface 与基线   | Phase 02 通过                                |
+| 02   | Vue 语义与引用查询   | **pass；V1–V4/V6 通过，已获准进入 Phase 03** |
+| 03   | API Surface 与基线   | Phase 02 通过；Phase 03 已实现，等待评审     |
 | 04   | 关系图与架构分析     | Phase 03 通过                                |
 | 05   | 影响分析与审计       | Phase 04 通过                                |
 | 06   | 增量、性能与一致性   | Phase 05 通过                                |
 | 07   | 复用性、MCP 与交付   | Phase 06 通过                                |
 
-**Phase 00 的结论具有否决权**：任一 P0 项无法验证通过，必须停止并提交架构调整申请，不得"先做着看"。Phase 00 与 Phase 01 已完成，Phase 02 已实现并等待负责人评审；**在评审通过前，本仓库不会自动进入 Phase 03**。
+**Phase 00 的结论具有否决权**：任一 P0 项无法验证通过，必须停止并提交架构调整申请，不得"先做着看"。Phase 00、01、02 已完成；Phase 03 已实现并等待负责人评审；**在评审通过前，本仓库不会自动进入 Phase 04**。
 
 未来接入顺序（工具实现后，按 21.1）：安装 → 手动接入（MCP / AGENTS.md / Skill）→ `nex init` → `nex build` → `nex status`。工具只打印接入物料，不代写任何配置文件。
 
@@ -388,7 +411,7 @@ Phase 00 验证只在合成夹具中执行了受限配置与恶意用例；未�
 Phase 01/02 新增加的限制：
 
 - 多 root 查询面不完整：`symbol` / `references` 仅支持单 root，多 root 返回 E24；`search --roots all` 可用。
-- `status --json-schema`、`doctor --repair` / `--mcp`、`print`、`mcp`、`update` 均返回 E24；`doctor --dump-vue-map` 已可用。
+- `status --json-schema`、`doctor --repair` / `--mcp`、`print`、`mcp`、`update` 均返回 E24；`doctor --dump-vue-map` 与 Surface 检查已可用。
 - Vue：真实 TS 文件 import `.vue` 的跨语言边可能缺失；复杂 Props / Slot 未解析时标 heuristic；`vue.typeResolver` 不执行，仅告警；Vue 增量未实现（Phase 06）。
 - SCIP 子进程峰值 RSS 不可观测，manifest 记录 `scipPeakRssMB: null` 与原因；不得把父进程 RSS 当作 SCIP 峰值。
 - 真实增量、失效传播、五态状态机的 `dirty` / `indexing` 运行期转换未实现；Phase 01/02 只有全量 build 与提交/恢复基础。
@@ -416,9 +439,9 @@ Phase 00 新增的限制（必须在 Phase 01 前评审）：
 
 待确认：
 
-- Phase 02 是否通过负责人评审并进入 Phase 03（**当前等待**）。
+- Phase 03 是否通过负责人评审并进入 Phase 04（**当前等待**）。
 - 4 个 workspace 包仍为 `private: true`；Phase 07 发布前需按 changesets 流程调整。
-- `npm ci` 完整重装尚未重跑；Phase 02 入场以 `npm ci --dry-run`（退出 0）作为 lockfile 基线，历史记录见 Phase 01 报告 §11。
+- `npm ci` 完整重装在本地未重跑；Phase 03 以 `npm ci --dry-run` 与 act 容器内 `npm ci` 作为基线，历史记录见 Phase 01 报告 §11。
 
 如发现文档冲突、关键配置缺失或规范无法落实，应按 [`docs/20-prohibitions.md`](docs/20-prohibitions.md) 的 20.6 提交《架构问题报告》，**不得自行作出架构级决策**。
 

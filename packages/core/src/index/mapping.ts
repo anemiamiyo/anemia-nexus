@@ -312,6 +312,7 @@ export function mapSymbolsAndReferences(options: ExtractReferencesOptions): Mapp
       const current = scipToSymbolId.get(entry.symbol);
       if (current === undefined) scipToSymbolId.set(entry.symbol, assignment.symbolId);
     }
+    assignment.mappingQuality = mappingQuality;
     scipSymbolBySymbolId.set(assignment.symbolId, scipSymbol);
     const record = toSymbolRecord(assignment, mappingQuality);
     symbols.push(record);

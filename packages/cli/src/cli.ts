@@ -15,6 +15,8 @@ import {
   querySearch,
   querySymbol,
   statusReport,
+  writeBaselineSnapshot,
+  diffCurrentSurface,
   type BuildProgressEvent,
   type Coverage,
   type QueryEnvelope,
@@ -629,13 +631,119 @@ export function buildProgram(): Command {
     });
   });
 
+  const apiSnapshot = addExamples(
+    program
+      .command('api-snapshot')
+      .description('write nexus.baseline.json from the current API Surface')
+      .helpGroup('Governance')
+      .option('--yes', 'overwrite an existing baseline without prompting'),
+    ['nex api-snapshot --yes', 'nex api-snapshot --root ui'],
+  );
+  apiSnapshot.action(async (_options, command: Command) => {
+    await execute(command, async (context) => {
+      const loaded = await loadConfig({
+        projectRoot: context.projectRoot,
+        trustConfig: context.trustConfig,
+      });
+      const result = writeBaselineSnapshot({
+        projectRoot: context.projectRoot,
+        loadedConfig: loaded,
+        rootId: context.root,
+        yes: context.yes,
+      });
+      const roots = Object.keys(result.baseline.roots)
+        .sort()
+        .map((rootId) => {
+          const root = result.baseline.roots[rootId];
+          return {
+            rootId,
+            entries: root?.entries.length ?? 0,
+            internal: root?.internal.length ?? 0,
+            opaque: root?.opaque.length ?? 0,
+            deprecated: root?.deprecated.length ?? 0,
+            surfaceHash: root?.surfaceHash ?? null,
+          };
+        });
+      return {
+        data: {
+          command: 'api-snapshot',
+          path: result.path,
+          overwritten: result.overwritten,
+          surfaceHash: result.surfaceHash,
+          counts: {
+            total: roots.reduce((sum, root) => sum + root.entries, 0),
+            roots: roots.length,
+            entries: roots.reduce((sum, root) => sum + root.entries, 0),
+            internal: roots.reduce((sum, root) => sum + root.internal, 0),
+            deprecated: roots.reduce((sum, root) => sum + root.deprecated, 0),
+          },
+          roots,
+        },
+        exitCode: 0,
+      };
+    });
+  });
+
+  const apiDiff = addExamples(
+    program
+      .command('api-diff')
+      .description('semantic diff of the current API Surface against a baseline')
+      .helpGroup('Governance')
+      .option('--base <ref|file>', 'baseline file or git ref')
+      .option('--fail-on <level>', 'breaking|additive|ambiguous', 'breaking'),
+    ['nex api-diff', 'nex api-diff --base HEAD~1 --fail-on breaking'],
+  );
+  apiDiff.action(async (_options, command: Command) => {
+    await execute(command, async (context) => {
+      const opts = command.optsWithGlobals() as Record<string, unknown>;
+      const failOn = typeof opts.failOn === 'string' ? opts.failOn : 'breaking';
+      if (!['breaking', 'additive', 'ambiguous'].includes(failOn)) {
+        throw nexusError('E00', 'invalid --fail-on value', {
+          reason: `expected breaking, additive or ambiguous, received ${JSON.stringify(failOn)}`,
+          suggestion: 'Use --fail-on breaking|additive|ambiguous.',
+        });
+      }
+      const loaded = await loadConfig({
+        projectRoot: context.projectRoot,
+        trustConfig: context.trustConfig,
+      });
+      const result = diffCurrentSurface({
+        projectRoot: context.projectRoot,
+        loadedConfig: loaded,
+        rootId: context.root,
+        base: typeof opts.base === 'string' ? opts.base : null,
+      });
+      const rank: Record<string, number> = { breaking: 3, additive: 2, ambiguous: 1 };
+      const threshold = rank[failOn] ?? 3;
+      const blocking = result.diff.items.filter(
+        (entry) => entry.severity !== 'internal' && (rank[entry.severity] ?? 0) >= threshold,
+      );
+      const warningsOnly =
+        blocking.length === 0 && result.diff.items.some((entry) => entry.severity === 'ambiguous');
+      const exitCode = blocking.length > 0 ? 1 : warningsOnly ? 2 : 0;
+      return {
+        data: {
+          command: 'api-diff',
+          base: result.baseLabel,
+          surfaceHash: result.diff.surfaceHash,
+          baselineSurfaceHash: result.diff.baselineSurfaceHash,
+          failOn,
+          exitCode,
+          counts: result.diff.counts,
+          items: result.diff.items,
+          warnings: result.diff.warnings,
+          notes: result.diff.notes,
+        },
+        exitCode,
+      };
+    });
+  });
+
   const stubs: Array<[string, string, string]> = [
     ['update', 'incremental update (not provided)', 'Lifecycle'],
     ['deps', 'dependency and architecture view (not provided)', 'Query'],
     ['impact', 'change impact analysis (not provided)', 'Query'],
     ['context', 'layered context packets (not provided)', 'Query'],
-    ['api-snapshot', 'API surface baseline (not provided)', 'Governance'],
-    ['api-diff', 'API surface diff (not provided)', 'Governance'],
     ['similar', 'similar API search (not provided)', 'Governance'],
     ['audit-duplicates', 'duplicate implementation audit (not provided)', 'Governance'],
     ['preflight', 'pre-change audit (not provided)', 'Audit'],
@@ -692,7 +800,7 @@ Compatibility aliases (not shown above):
   agents       -> print agents
   skill        -> print skill
 
-Phase 01 implements: init, build, status, doctor, symbol, references, search.
+Phase 03 implements: init, build, status, doctor, symbol, references, search, api-snapshot, api-diff.
 Other commands return E24 "not provided"; they never return fake data.
 `,
   );

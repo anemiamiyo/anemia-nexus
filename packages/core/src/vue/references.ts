@@ -311,6 +311,7 @@ export function mapVueSymbolsAndReferences(options: MapVueSymbolsOptions): VueMa
       stats.eligible += 1;
       if (quality === 'unmapped') stats.unmapped += 1;
     }
+    assignment.mappingQuality = quality === 'unmapped' ? 'unmapped' : quality;
     scipSymbolBySymbolId.set(assignment.symbolId, scipSymbol);
     qualityBySymbolId.set(assignment.symbolId, quality);
     const record = toSymbolRecord(assignment, quality === 'unmapped' ? 'unmapped' : quality);

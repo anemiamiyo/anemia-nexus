@@ -24,6 +24,29 @@ export { checkTypecheck } from './discovery/typecheck.js';
 export { runInit } from './init.js';
 export type { InitOptions, InitPlan, InitResult, InitCandidateView } from './init.js';
 export { buildWorkspace, clearTmp } from './index/build.js';
+export { BuildWriter, commitBuild, WRITE_BATCH_SIZE } from './store/commit.js';
+export {
+  createSurfaceSnapshot,
+  diffCurrentSurface,
+  writeBaselineSnapshot,
+  buildSurfaceLookup,
+} from './surface/service.js';
+export { buildSurface } from './surface/builder.js';
+export { diffSnapshots } from './surface/diff.js';
+export { readSurface, readBaseline } from './surface/store.js';
+export type {
+  DeprecatedChain,
+  SurfaceBaseline,
+  SurfaceDiff,
+  SurfaceDiffItem,
+  SurfaceEntry,
+  SurfaceEvidenceSource,
+  SurfaceExportKind,
+  SurfaceInternalRecord,
+  SurfaceOpaqueRecord,
+  SurfaceRootSnapshot,
+  SurfaceSnapshot,
+} from './surface/types.js';
 export type {
   BuildOptions,
   BuildProgressEvent,

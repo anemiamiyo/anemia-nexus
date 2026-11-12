@@ -24,6 +24,7 @@
 | `--experimental-strip-types` | 在独立子进程中加载 `nexus.config.ts` | **22.16.0** | **已验证：Phase 01（22.16.0 / 24.22.2）** | 18.3.2 |
 | `node:readline` `createInterface()` | TTY 下的 init 交互提示（稳定 API，无实验标记） | 随 Node 提供 | **已验证：Phase 01 构建与 typecheck** | 11.6 |
 | `node:fs` `cpSync` | **仅测试夹具**复制；不进入产品运行路径 | 16.7.0（测试环境） | 已验证：Phase 01 测试 | 17.1 |
+| `node:child_process` `execFileSync` | 读取 git ref 形式的 API 基线（`git show <ref>:<path>`） | 随 Node 提供 | **已验证：Phase 03 单测与 act** | 6.3、11.3 |
 
 ## 3. 维护规则
 

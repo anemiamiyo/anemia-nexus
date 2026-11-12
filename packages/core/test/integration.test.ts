@@ -76,7 +76,7 @@ describe('F01 build and queries', () => {
         true,
       );
       expect(symbol.envelope.items[0]?.kind).toBe('class');
-      expect(symbol.envelope.items[0]?.surface).toBe('unknown');
+      expect(symbol.envelope.items[0]?.surface).toBe('internal');
 
       const search = await querySearch(
         { projectRoot: fixture.directory, cwd: fixture.directory },

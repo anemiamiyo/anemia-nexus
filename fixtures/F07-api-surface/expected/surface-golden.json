@@ -1,0 +1,52 @@
+{
+  "rootId": "fixture-api-surface",
+  "note": "人工核对的 Surface golden：只列断言用字段，不是完整快照；不从被测 Surface Builder 自证。",
+  "public": {
+    "add": {
+      "primaryEvidenceSource": "package-exports",
+      "exportKind": "value",
+      "conditions": ["import", "require", "types"],
+      "derived": true
+    },
+    "Both": {
+      "primaryEvidenceSource": "package-exports",
+      "exportKind": "both",
+      "conditions": ["import", "require", "types"],
+      "derived": true
+    },
+    "Numeric": {
+      "primaryEvidenceSource": "package-exports",
+      "exportKind": "type",
+      "isTypeOnly": true,
+      "runtimePresent": false,
+      "conditions": ["import", "require", "types"],
+      "derived": true
+    },
+    "format": {
+      "primaryEvidenceSource": "package-exports",
+      "exportKind": "value",
+      "entryPaths": [".", "./utils"],
+      "derived": true
+    },
+    "feature": {
+      "primaryEvidenceSource": "package-exports",
+      "exportKind": "value",
+      "entryPath": "./advanced/feature",
+      "derived": false
+    },
+    "oldAdd": {
+      "primaryEvidenceSource": "package-exports",
+      "stability": "deprecated",
+      "successor": "add"
+    },
+    "doomed": {
+      "primaryEvidenceSource": "package-exports",
+      "stability": "deprecated",
+      "successor": null,
+      "removalVersion": "2.0.0"
+    }
+  },
+  "internal": ["InternalShape", "internalHelper"],
+  "opaque": ["export="],
+  "forbiddenPublic": ["internalHelper", "InternalShape"]
+}

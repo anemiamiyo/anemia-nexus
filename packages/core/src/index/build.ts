@@ -16,7 +16,6 @@ import { collectDeclarations, createSyntaxProgram } from './declarations.js';
 import type {
   ComponentRecord,
   DeclarationRecord,
-  MappingQuality,
   ReferenceRecord,
   VueAnalysisSummary,
   VueFileMetaRecord,
@@ -64,6 +63,9 @@ import {
 } from '../vue/declarations.js';
 import { mapVueSymbolsAndReferences, type VueMappingResult } from '../vue/references.js';
 import { writeShadowProject, type ShadowProject } from '../vue/shadow.js';
+import { buildSurface } from '../surface/builder.js';
+import { writeSurface } from '../surface/store.js';
+import type { SurfaceRootSnapshot } from '../surface/types.js';
 
 export interface BuildProgressEvent {
   type:
@@ -118,6 +120,7 @@ interface RootAnalysis {
   vueDeclarationSet: ReadonlySet<DeclarationRecord>;
   components: ComponentRecord[];
   vueFileMeta: VueFileMetaRecord[];
+  surface: SurfaceRootSnapshot;
   vue: VueAnalysisSummary;
   degraded: string[];
   timings: { scanMs: number; analyzeMs: number; vueMs: number; scipMs: number; mapMs: number };
@@ -194,16 +197,14 @@ function toPreviousIdentities(
   return map;
 }
 
-function mappingRows(input: {
+function* mappingRows(input: {
   assignments: readonly IdentityAssignment[];
   vueDeclarationSet: ReadonlySet<DeclarationRecord>;
   vueMapping: VueMappingResult | null;
-  qualityBySymbolId: ReadonlyMap<string, MappingQuality>;
-}): MappingRow[] {
-  const rows: MappingRow[] = [];
+}): Generator<MappingRow> {
   for (const assignment of input.assignments) {
     const declaration = assignment.declaration;
-    const quality = input.qualityBySymbolId.get(assignment.symbolId) ?? 'unmapped';
+    const quality = assignment.mappingQuality;
     if (input.vueDeclarationSet.has(declaration)) {
       const vueDeclaration = declaration as VueDeclaration;
       const anchor = vueDeclaration.generatedAnchor;
@@ -212,7 +213,7 @@ function mappingRows(input: {
           ? `vue:${vueDeclaration.path}#component`
           : `vue:${vueDeclaration.path}#${anchor.nameLine}:${anchor.nameCol}`;
       const scipSymbol = input.vueMapping?.scipSymbolBySymbolId.get(assignment.symbolId) ?? null;
-      rows.push({
+      yield {
         symbolId: assignment.symbolId,
         engine: 'scip',
         engineRef: scipSymbol ?? '',
@@ -222,16 +223,16 @@ function mappingRows(input: {
           descriptor: scipSymbol === null ? '' : scipSymbol.slice(-160),
         },
         analyzerVersion: ANALYZER_VERSION.scip,
-      });
-      rows.push({
+      };
+      yield {
         symbolId: assignment.symbolId,
         engine: 'ts',
         engineRef: anchorRef,
         matchQuality: anchor === null ? 'unmapped' : quality,
         evidence: { projector: VUE_PROJECTOR_VERSION, synthetic: anchor === null },
         analyzerVersion: ANALYZER_VERSION.typescript,
-      });
-      rows.push({
+      };
+      yield {
         symbolId: assignment.symbolId,
         engine: 'vue',
         engineRef: anchorRef,
@@ -241,12 +242,12 @@ function mappingRows(input: {
           languageCoreVersion: VUE_LANGUAGE_CORE_VERSION,
         },
         analyzerVersion: VUE_LANGUAGE_CORE_VERSION,
-      });
+      };
       continue;
     }
     const scipSymbol = input.vueMapping?.scipSymbolBySymbolId.get(assignment.symbolId) ?? null;
     void scipSymbol;
-    rows.push({
+    yield {
       symbolId: assignment.symbolId,
       engine: 'scip',
       engineRef: assignment.scipSymbol ?? '',
@@ -256,17 +257,16 @@ function mappingRows(input: {
         descriptor: assignment.scipSymbol === null ? '' : assignment.scipSymbol.slice(-160),
       },
       analyzerVersion: ANALYZER_VERSION.scip,
-    });
-    rows.push({
+    };
+    yield {
       symbolId: assignment.symbolId,
       engine: 'ts',
       engineRef: locatorKey(declaration),
       matchQuality: quality,
       evidence: { kind: declaration.kind, nameChain: declaration.nameChain },
       analyzerVersion: ANALYZER_VERSION.typescript,
-    });
+    };
   }
-  return rows;
 }
 
 function emptyStats(eligible = 0): MappingStats {
@@ -348,6 +348,29 @@ function mergeMappings(
   };
 }
 
+/**
+ * Yield array entries while releasing each slot, so the write phase does not
+ * keep a second full copy alive next to the SQLite statements
+ * (docs/21-phase-00.md: compute-while-writing).
+ */
+function* drain<T>(items: T[]): Generator<T> {
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index] as T;
+    items[index] = undefined as unknown as T;
+    yield item;
+  }
+  items.length = 0;
+}
+
+function* withBuildId(
+  references: Iterable<ReferenceRecord>,
+  buildId: string,
+): Generator<ReferenceRecord> {
+  for (const reference of references) {
+    yield { ...reference, buildId };
+  }
+}
+
 function compareReferences(left: ReferenceRecord, right: ReferenceRecord): number {
   if (left.sourceFile !== right.sourceFile) return left.sourceFile < right.sourceFile ? -1 : 1;
   if (left.line !== right.line) return left.line - right.line;
@@ -421,6 +444,24 @@ function buildVueSummary(input: {
         input.vueMapping?.unmappedReasonCounts['synthetic-component'] ?? syntheticComponents,
     },
     errors: input.errors.slice(0, 20),
+  };
+}
+
+function emptySurface(root: RootCandidate, warnings: string[] = []): SurfaceRootSnapshot {
+  return {
+    surfaceVersion: 1,
+    rootId: root.rootId,
+    rootPath: root.rootPath,
+    packageName: root.packageName,
+    buildId: '',
+    buildFingerprint: '',
+    packageVersion: null,
+    surfaceHash: 'sh_aaaaaaaaaaaaaaaa',
+    entries: [],
+    internal: [],
+    opaque: [],
+    deprecated: [],
+    warnings,
   };
 }
 
@@ -675,6 +716,40 @@ async function analyzeRoot(
     // reason list in the manifest warnings only.
     degraded.push('vue-errors');
   }
+  const rootPrefix =
+    root.rootPath === '.' || root.rootPath === ''
+      ? ''
+      : `${root.rootPath.replace(/^\.\//, '').replace(/\/+$/, '')}/`;
+  const rootRelativeFiles = scan.files.map((file) =>
+    rootPrefix !== '' && file.path.startsWith(rootPrefix)
+      ? file.path.slice(rootPrefix.length)
+      : file.path,
+  );
+  let surface: SurfaceRootSnapshot;
+  try {
+    surface = buildSurface({
+      projectRoot: options.projectRoot,
+      rootAbs,
+      rootId: root.rootId,
+      rootPath: root.rootPath,
+      packageName: root.packageName,
+      buildId: '',
+      buildFingerprint: '',
+      programs: program,
+      files: rootRelativeFiles,
+      symbols: mapping.symbols,
+      components,
+      config: effective.surface,
+    });
+    if (surface.warnings.length > 0) {
+      degraded.push('surface-warnings');
+    }
+  } catch (error) {
+    degraded.push('surface-failed');
+    surface = emptySurface(root, [
+      `surface build failed: ${error instanceof Error ? error.message : String(error)}`,
+    ]);
+  }
   const analyzeMs = Date.now() - analyzeStarted;
 
   return {
@@ -687,6 +762,7 @@ async function analyzeRoot(
     vueDeclarationSet,
     components,
     vueFileMeta,
+    surface,
     vue,
     degraded: [...new Set(degraded)].sort(),
     timings: { scanMs, analyzeMs, vueMs: Math.max(vueMs, 0), scipMs, mapMs },
@@ -774,17 +850,14 @@ async function buildRoot(input: {
     };
     const buildFingerprint = computeBuildFingerprint(fields);
     const buildId = `b_${buildFingerprint.slice(3, 11)}_${Date.now().toString(36)}_${randomBytes(3).toString('hex')}`;
-    const references = analysis.mapping.references.map((reference) => ({
-      ...reference,
-      buildId,
-    }));
+    const coverage = coverageOf(analysis);
     const writeStarted = Date.now();
     emit(options, {
       type: 'write',
       rootId: root.rootId,
-      message: `${analysis.mapping.symbols.length} symbols, ${references.length} references`,
+      message: `${analysis.mapping.symbols.length} symbols, ${analysis.mapping.references.length} references`,
     });
-    commitBuild({
+    const committed = commitBuild({
       dbPath: databasePath(projectRoot, root.rootId),
       rootId: root.rootId,
       buildId,
@@ -793,24 +866,27 @@ async function buildRoot(input: {
       finishedAt: new Date().toISOString(),
       fields,
       files: analysis.scan.files,
-      symbols: analysis.mapping.symbols,
-      references,
+      symbols: drain(analysis.mapping.symbols),
+      references: withBuildId(drain(analysis.mapping.references), buildId),
       mappingRows: mappingRows({
         assignments: analysis.assignments,
         vueDeclarationSet: analysis.vueDeclarationSet,
         vueMapping: analysis.vueMapping,
-        qualityBySymbolId: new Map(
-          analysis.mapping.symbols.map((symbol) => [symbol.symbolId, symbol.mappingQuality]),
-        ),
       }),
       components: analysis.components,
       vueFileMeta: analysis.vueFileMeta,
     });
+    const surface = {
+      ...analysis.surface,
+      buildId,
+      buildFingerprint,
+      warnings: [...analysis.surface.warnings],
+    };
+    writeSurface(projectRoot, surface);
     const writeMs = Date.now() - writeStarted;
     const builtAt = new Date().toISOString();
     const sizes = dbSizes(databasePath(projectRoot, root.rootId));
     const peakRssMB = sampler.stop();
-    const coverage = coverageOf(analysis);
     const manifest: RootManifest = {
       schemaVersion: SCHEMA_VERSION,
       indexVersion: 2,
@@ -831,9 +907,9 @@ async function buildRoot(input: {
       state: 'ready',
       staleness: 'fresh',
       counts: {
-        files: analysis.scan.files.length,
-        symbols: analysis.mapping.symbols.length,
-        references: references.length,
+        files: committed.counts.files,
+        symbols: committed.counts.symbols,
+        references: committed.counts.references,
         unresolvedReferences: coverage.unresolved,
       },
       coverage,
@@ -855,22 +931,32 @@ async function buildRoot(input: {
         scipMs: analysis.timings.scipMs,
         mapMs: analysis.timings.mapMs,
         writeMs,
+        writeBatches: committed.writeBatches,
         totalMs: Date.now() - totalStarted,
       },
       memory: {
         peakRssMB,
         scipPeakRssMB: null,
         scipPeakRssUnavailableReason:
-          'SCIP runs in a child process; child RSS sampling is not provided in Phase 01/02',
+          'SCIP runs in a child process; child RSS sampling is not provided in Phase 01/02/03',
       },
       dbBytes: sizes.dbBytes,
       walBytes: sizes.walBytes,
+      surfaceHash: surface.surfaceHash,
+      surfaceEntries: surface.entries.length,
       degraded,
-      warnings: degraded.map((entry) => ({
-        code: entry === 'syntax-only' ? 'E03' : entry.startsWith('vue') ? 'E11' : 'E11',
-        message: `degraded: ${entry}`,
-        severity: 'warning' as const,
-      })),
+      warnings: [
+        ...degraded.map((entry) => ({
+          code: entry === 'syntax-only' ? 'E03' : entry.startsWith('vue') ? 'E11' : 'E11',
+          message: `degraded: ${entry}`,
+          severity: 'warning' as const,
+        })),
+        ...surface.warnings.map((message) => ({
+          code: 'E11' as const,
+          message: `surface: ${message}`,
+          severity: 'warning' as const,
+        })),
+      ],
       configLoads: configLoads(projectRoot, options.loadedConfig),
       builtAt,
       lastSuccessAt: builtAt,
@@ -884,9 +970,9 @@ async function buildRoot(input: {
       ok: true,
       buildId,
       buildFingerprint,
-      files: analysis.scan.files.length,
-      symbols: analysis.mapping.symbols.length,
-      references: references.length,
+      files: committed.counts.files,
+      symbols: committed.counts.symbols,
+      references: committed.counts.references,
       coverage,
       vue: analysis.vue,
       degraded,
@@ -956,7 +1042,16 @@ function recordFailure(
       mappingSuccessRate: 0,
       falseMatchCount: 0,
     },
-    timings: { scanMs: 0, analyzeMs: 0, vueMs: 0, scipMs: 0, mapMs: 0, writeMs: 0, totalMs: 0 },
+    timings: {
+      scanMs: 0,
+      analyzeMs: 0,
+      vueMs: 0,
+      scipMs: 0,
+      mapMs: 0,
+      writeMs: 0,
+      writeBatches: 0,
+      totalMs: 0,
+    },
     memory: { peakRssMB: 0, scipPeakRssMB: null, scipPeakRssUnavailableReason: null },
     dbBytes: 0,
     walBytes: 0,

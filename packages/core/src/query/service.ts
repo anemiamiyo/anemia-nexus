@@ -23,6 +23,9 @@ import {
   type ReadStore,
 } from '../store/read.js';
 import { readHistory } from '../store/history.js';
+import { readSurface } from '../surface/store.js';
+import { buildSurfaceLookup, type SurfaceLookup } from '../surface/service.js';
+import type { SurfaceEntry, SurfaceInternalRecord } from '../surface/types.js';
 
 export interface QueryOptions {
   projectRoot: string;
@@ -49,7 +52,9 @@ export interface SymbolItem {
   visibility: string;
   exportKind: string;
   isPublic: boolean;
-  surface: 'unknown';
+  surface: 'public' | 'internal' | 'opaque' | 'unknown';
+  api?: SurfaceEntry;
+  internalApi?: SurfaceInternalRecord;
   analysisEngine: string;
   isTypeOnly: boolean;
   identityConfidence: string;
@@ -240,12 +245,46 @@ function aggregateCoverage(roots: readonly RootStatus[]): Coverage {
   return coverage;
 }
 
+function loadSurfaceLookup(
+  projectRoot: string,
+  rootId: string,
+  context: PreparedContext,
+): SurfaceLookup {
+  const read = readSurface(projectRoot, rootId);
+  if (read.surface === null || !read.matchesManifest) {
+    context.warnings.push({
+      code: 'E11',
+      message: `root ${rootId}: API Surface is unavailable (${read.error ?? 'surface.json does not match manifest'}); surface is reported as unknown`,
+      severity: 'warning',
+    });
+    return buildSurfaceLookup(null);
+  }
+  return buildSurfaceLookup(read.surface);
+}
+
 function toSymbolItem(
   store: ReadStore,
   rootId: string,
   symbol: SymbolRecord,
   withHistory: boolean,
+  surface: SurfaceLookup,
 ): SymbolItem {
+  const publicEntries = [...(surface.entriesBySymbolId.get(symbol.symbolId) ?? [])].sort(
+    (left, right) => {
+      const rank = {
+        'manual-override': 0,
+        'package-exports': 1,
+        'explicit-entry': 2,
+        'barrel-derived': 3,
+        none: 4,
+      } as const;
+      const difference = rank[left.primaryEvidenceSource] - rank[right.primaryEvidenceSource];
+      if (difference !== 0) return difference;
+      return (left.entryPath ?? '') < (right.entryPath ?? '') ? -1 : 1;
+    },
+  );
+  const publicEntry = publicEntries[0];
+  const internal = surface.internalBySymbolId.get(symbol.symbolId);
   const item: SymbolItem = {
     rootId,
     symbolId: symbol.symbolId,
@@ -263,7 +302,7 @@ function toSymbolItem(
     visibility: symbol.visibility,
     exportKind: symbol.exportKind,
     isPublic: symbol.isPublic,
-    surface: 'unknown',
+    surface: publicEntry !== undefined ? 'public' : internal !== undefined ? 'internal' : 'unknown',
     analysisEngine: symbol.analysisEngine,
     isTypeOnly: symbol.isTypeOnly,
     identityConfidence: symbol.identityConfidence,
@@ -272,6 +311,8 @@ function toSymbolItem(
     anonymous: symbol.anonymous,
     mappingQuality: symbol.mappingQuality,
   };
+  if (publicEntry !== undefined) item.api = publicEntry;
+  if (internal !== undefined) item.internalApi = internal;
   if (symbol.kind === 'component') {
     const component = readComponent(store, symbol.symbolId);
     if (component !== null) item.component = component;
@@ -407,7 +448,13 @@ export async function querySymbol(
   }
   try {
     const symbol = resolveSymbol(store, identifier);
-    const item = toSymbolItem(store, root.rootId, symbol, withHistory);
+    const item = toSymbolItem(
+      store,
+      root.rootId,
+      symbol,
+      withHistory,
+      loadSurfaceLookup(options.projectRoot, root.rootId, context),
+    );
     const result = envelope({
       command: 'symbol',
       roots,
@@ -528,7 +575,10 @@ export async function querySearch(
         pathPrefix: filters.pathPrefix,
         publicOnly: filters.publicOnly,
       });
-      for (const symbol of symbols) items.push(toSymbolItem(store, root.rootId, symbol, false));
+      const lookup = loadSurfaceLookup(options.projectRoot, root.rootId, context);
+      for (const symbol of symbols) {
+        items.push(toSymbolItem(store, root.rootId, symbol, false, lookup));
+      }
       if (symbols.length === 0) {
         notes.push(`root ${root.rootId}: no matches within the covered files`);
       }

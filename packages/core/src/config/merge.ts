@@ -7,6 +7,7 @@ import type {
   NexusConfig,
   OutputConfig,
   RootOverride,
+  SurfaceConfig,
 } from './schema.js';
 
 export interface EffectiveRootConfig {
@@ -15,6 +16,7 @@ export interface EffectiveRootConfig {
   budgets: BudgetsConfig;
   output: OutputConfig;
   style: NexusConfig['style'];
+  surface: SurfaceConfig;
   vue: NexusConfig['vue'];
   commands: NexusConfig['commands'];
   configHash: string;
@@ -87,6 +89,11 @@ export function resolveRootConfig(
   const { ignore, sources } = mergeIgnore(config.defaults.ignore, override?.ignore);
   const budgets: BudgetsConfig = { ...config.defaults.budgets, ...(override?.budgets ?? {}) };
   const output: OutputConfig = { ...config.defaults.output, ...(override?.output ?? {}) };
+  const surface: SurfaceConfig = {
+    entries: override?.surface?.entries ?? config.surface.entries,
+    manual: override?.surface?.manual ?? config.surface.manual,
+    baselinePath: override?.surface?.baselinePath ?? config.surface.baselinePath,
+  };
   const effective = {
     configVersion: config.configVersion,
     rootId,
@@ -94,6 +101,7 @@ export function resolveRootConfig(
     budgets,
     output,
     style: config.style,
+    surface,
     vue: config.vue,
     commands: config.commands,
   };
@@ -103,6 +111,7 @@ export function resolveRootConfig(
     budgets,
     output,
     style: config.style,
+    surface,
     vue: config.vue,
     commands: config.commands,
     configHash: sha256Hex(stableStringify(effective)),

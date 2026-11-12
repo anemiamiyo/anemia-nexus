@@ -44,11 +44,32 @@ export const workspacesSchema = z.strictObject({
   followTsReferences: z.boolean().default(false),
 });
 
+export const surfaceManualSchema = z
+  .strictObject({
+    symbolId: z.string().min(1).optional(),
+    nameChain: z.string().min(1).optional(),
+    name: z.string().min(1).optional(),
+    exposure: z.enum(['public', 'internal']),
+    reason: z.string().max(500).optional(),
+  })
+  .refine(
+    (value) =>
+      value.symbolId !== undefined || value.nameChain !== undefined || value.name !== undefined,
+    { message: 'manual override requires symbolId, nameChain or name' },
+  );
+
+export const surfaceSchema = z.strictObject({
+  entries: z.array(safeRelativePattern).default([]),
+  manual: z.array(surfaceManualSchema).default([]),
+  baselinePath: safeRelativePattern.default('nexus.baseline.json'),
+});
+
 export const rootOverrideSchema = z.strictObject({
   ignore: ignoreSchema.partial().optional(),
   budgets: budgetsSchema.partial().optional(),
   output: outputSchema.partial().optional(),
   include: z.array(safeRelativePattern).optional(),
+  surface: surfaceSchema.partial().optional(),
 });
 
 export const styleSchema = z.strictObject({
@@ -79,6 +100,7 @@ export const configSchema = z.strictObject({
   workspaces: workspacesSchema.default(() => workspacesSchema.parse({})),
   roots: z.record(z.string(), rootOverrideSchema).default({}),
   style: styleSchema.default(() => styleSchema.parse({})),
+  surface: surfaceSchema.default(() => surfaceSchema.parse({})),
   vue: vueSchema.default(() => vueSchema.parse({})),
   commands: commandsSchema.default(() => commandsSchema.parse({})),
 });
@@ -87,6 +109,8 @@ export type NexusConfig = z.infer<typeof configSchema>;
 export type IgnoreConfig = z.infer<typeof ignoreSchema>;
 export type BudgetsConfig = z.infer<typeof budgetsSchema>;
 export type OutputConfig = z.infer<typeof outputSchema>;
+export type SurfaceConfig = z.infer<typeof surfaceSchema>;
+export type SurfaceManualConfig = z.infer<typeof surfaceManualSchema>;
 export type WorkspacesConfig = z.infer<typeof workspacesSchema>;
 export type CommandConfig = z.infer<typeof commandSchema>;
 export type RootOverride = z.infer<typeof rootOverrideSchema>;

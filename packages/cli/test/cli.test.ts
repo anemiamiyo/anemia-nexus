@@ -263,3 +263,66 @@ describe('lifecycle commands', () => {
     }
   });
 });
+
+describe('API Surface commands', () => {
+  it('writes a baseline, refuses an implicit overwrite and fails on breaking diff', async () => {
+    const directory = makeProject('F07-api-surface', 'cli-surface');
+    try {
+      let result = await runCli(['init', '--roots', 'all', '--write-config', '--yes'], directory);
+      expect(result.code).toBe(0);
+      result = await runCli(['build'], directory);
+      expect(result.code).toBe(0);
+
+      result = await runCli(['api-snapshot', '--format', 'json'], directory);
+      expect(result.code).toBe(0);
+      const snapshot = JSON.parse(result.stdout) as {
+        path: string;
+        counts: { entries: number };
+      };
+      expect(snapshot.path).toBe('nexus.baseline.json');
+      expect(snapshot.counts.entries).toBeGreaterThan(0);
+      const baselinePath = path.join(directory, 'nexus.baseline.json');
+      expect(fs.existsSync(baselinePath)).toBe(true);
+
+      result = await runCli(['api-snapshot'], directory);
+      expect(result.code).toBe(64);
+      expect(result.stdout).toContain('E00');
+
+      result = await runCli(['api-diff', '--format', 'json'], directory);
+      expect(result.code).toBe(0);
+      const clean = JSON.parse(result.stdout) as { counts: { total: number } };
+      expect(clean.counts.total).toBe(0);
+
+      const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8')) as {
+        roots: Record<string, { entries: Array<{ name: string }> }>;
+      };
+      const root = Object.values(baseline.roots)[0]!;
+      root.entries = root.entries.filter((entry) => entry.name !== 'add');
+      fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`);
+
+      result = await runCli(['api-diff', '--format', 'json', '--fail-on', 'additive'], directory);
+      expect(result.code).toBe(1);
+      const diff = JSON.parse(result.stdout) as {
+        counts: { additive: number; breaking: number };
+      };
+      expect(diff.counts.additive).toBeGreaterThan(0);
+      expect(diff.counts.breaking).toBe(0);
+
+      const format = root.entries.find((entry) => entry.name === 'format') as {
+        normalizedSignature: string;
+      };
+      format.normalizedSignature = `${format.normalizedSignature} /* mutated */`;
+      fs.writeFileSync(
+        baselinePath,
+        `${JSON.stringify(baseline, null, 2)}
+`,
+      );
+      result = await runCli(['api-diff', '--format', 'json'], directory);
+      expect(result.code).toBe(2);
+      const ambiguous = JSON.parse(result.stdout) as { counts: { ambiguous: number } };
+      expect(ambiguous.counts.ambiguous).toBeGreaterThan(0);
+    } finally {
+      cleanup(directory);
+    }
+  }, 180_000);
+});

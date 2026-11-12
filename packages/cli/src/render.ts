@@ -52,6 +52,13 @@ function summaryFields(data: Row): string[] {
       'heuristic',
       'dynamicUnresolved',
       'partial',
+      'breaking',
+      'additive',
+      'internal',
+      'ambiguous',
+      'roots',
+      'entries',
+      'deprecated',
     ]) {
       const value = num(counts[key]);
       if (value !== null) parts.push(`counts.${key}=${value}`);
@@ -102,6 +109,12 @@ function symbolLines(data: Row): string[] {
     lines.push(
       `${str(item.path)}:${field(item.startLine)}:${field(item.startCol)}  ${str(item.kind)}  ${str(item.symbolId)}  ${str(item.nameChain)}  ${str(item.identityConfidence)}  ${str(item.surface, 'unknown')}`,
     );
+    const api = asRecord(item.api);
+    if (api !== null) {
+      lines.push(
+        `  surface ${str(api.primaryEvidenceSource)} evidence=${Array.isArray(api.evidenceSources) ? api.evidenceSources.join(',') : ''} exportKind=${str(api.exportKind)} entry=${str(api.entryPath, '-')} condition=${str(api.condition, '-')} stability=${str(api.stability)}`,
+      );
+    }
     const component = asRecord(item.component);
     if (component !== null) {
       const coverage = asRecord(component.propsCoverage);
@@ -123,7 +136,7 @@ function statusLines(data: Row): string[] {
   lines.push(`activeRoot ${str(data.activeRoot, '-')}`);
   for (const root of rowsOf(data, 'roots')) {
     lines.push(
-      `root ${str(root.rootId)}  ${str(root.rootPath)}  ${str(root.state)}/${str(root.staleness)}  files=${field(root.files)} symbols=${field(root.symbols)} refs=${field(root.references)}  build=${str(root.buildFingerprintPrefix, '-')}`,
+      `root ${str(root.rootId)}  ${str(root.rootPath)}  ${str(root.state)}/${str(root.staleness)}  files=${field(root.files)} symbols=${field(root.symbols)} refs=${field(root.references)}  build=${str(root.buildFingerprintPrefix, '-')}  surface=${field(root.surfaceEntries)}`,
     );
     if (Array.isArray(root.staleReason) && root.staleReason.length > 0) {
       lines.push(`  staleReason ${root.staleReason.map((entry) => String(entry)).join(', ')}`);
@@ -138,7 +151,7 @@ function statusLines(data: Row): string[] {
   const capabilities = asRecord(data.capabilities);
   if (capabilities) {
     lines.push(
-      `capabilities styleDependency=${field(capabilities.styleDependency)} styleSelector=${field(capabilities.styleSelector)} htmlFileRef=${field(capabilities.htmlFileRef)} vue=${field(capabilities.vue)} templateReferences=${field(capabilities.templateReferences)} incremental=${field(capabilities.incremental)} mcpFormats=${field(capabilities.mcpFormats)}`,
+      `capabilities styleDependency=${field(capabilities.styleDependency)} styleSelector=${field(capabilities.styleSelector)} htmlFileRef=${field(capabilities.htmlFileRef)} vue=${field(capabilities.vue)} templateReferences=${field(capabilities.templateReferences)} apiSurface=${field(capabilities.apiSurface)} incremental=${field(capabilities.incremental)} mcpFormats=${field(capabilities.mcpFormats)}`,
     );
   }
   validateLineLength(lines, 0);
@@ -169,6 +182,34 @@ function initLines(data: Row): string[] {
   }
   for (const message of Array.isArray(data.messages) ? data.messages : [])
     lines.push(`message ${String(message)}`);
+  return lines;
+}
+
+function apiSnapshotLines(data: Row): string[] {
+  const lines: string[] = [];
+  lines.push(
+    `baseline ${str(data.path, '-')} hash=${str(data.surfaceHash, '-')} overwritten=${field(data.overwritten)}`,
+  );
+  for (const root of rowsOf(data, 'roots')) {
+    lines.push(
+      `root ${str(root.rootId)}  entries=${field(root.entries)} internal=${field(root.internal)} opaque=${field(root.opaque)} deprecated=${field(root.deprecated)} hash=${str(root.surfaceHash, '-')}`,
+    );
+  }
+  return lines;
+}
+
+function apiDiffLines(data: Row): string[] {
+  const lines = rowsOf(data).map((item) => {
+    const before = asRecord(item.before);
+    const after = asRecord(item.after);
+    return `${str(item.severity)}  ${str(item.code)}  ${str(item.rootId)}  ${str(item.name)}  ${str(item.entryPath, '-')}#${str(item.condition, '-')}  ${str(item.rationale)}${before === null && after !== null ? ' [added]' : before !== null && after === null ? ' [removed]' : ''}`;
+  });
+  const counts = asRecord(data.counts);
+  if (counts) {
+    lines.push(
+      `summary breaking=${field(counts.breaking)} additive=${field(counts.additive)} internal=${field(counts.internal)} ambiguous=${field(counts.ambiguous)} total=${field(counts.total)} failOn=${str(data.failOn)}`,
+    );
+  }
   return lines;
 }
 
@@ -206,6 +247,10 @@ function entriesFor(command: string, data: Row): string[] {
       return initLines(data);
     case 'build':
       return buildLines(data);
+    case 'api-snapshot':
+      return apiSnapshotLines(data);
+    case 'api-diff':
+      return apiDiffLines(data);
     default:
       return [];
   }
@@ -314,6 +359,38 @@ export function renderMarkdown(input: RenderInput): string {
       markdownTable(['Root', 'Path', 'Indexable', 'Typecheck'], rows),
       '',
     );
+  } else if (command === 'api-snapshot') {
+    const rows = rowsOf(data, 'roots').map((root) => [
+      str(root.rootId),
+      field(root.entries),
+      field(root.internal),
+      field(root.opaque),
+      field(root.deprecated),
+      str(root.surfaceHash, '-'),
+    ]);
+    lines.push(
+      '## Roots',
+      '',
+      markdownTable(['Root', 'Entries', 'Internal', 'Opaque', 'Deprecated', 'Hash'], rows),
+      '',
+    );
+  } else if (command === 'api-diff') {
+    const rows = rowsOf(data).map((item) => [
+      str(item.severity),
+      str(item.code),
+      str(item.rootId),
+      str(item.name),
+      `${str(item.entryPath, '-')}#${str(item.condition, '-')}`,
+      str(item.rationale),
+    ]);
+    if (rows.length > 0) {
+      lines.push(
+        '## Differences',
+        '',
+        markdownTable(['Severity', 'Code', 'Root', 'Name', 'Entry', 'Rationale'], rows),
+        '',
+      );
+    }
   } else if (command === 'build') {
     const rows = rowsOf(data, 'roots').map((root) => [
       str(root.rootId),
@@ -349,6 +426,10 @@ function conclusion(command: string, data: Row): string {
       return `Doctor: ${field(asRecord(data.summary)?.pass ?? 0)} pass, ${field(asRecord(data.summary)?.warn ?? 0)} warn, ${field(asRecord(data.summary)?.fail ?? 0)} fail`;
     case 'build':
       return `Build: ${Array.isArray(data.failedRoots) && data.failedRoots.length > 0 ? 'failed' : 'ok'}`;
+    case 'api-snapshot':
+      return `API baseline: ${str(data.path, '-')} (${field(asRecord(data.counts)?.entries ?? 0)} entries)`;
+    case 'api-diff':
+      return `API diff: ${field(asRecord(data.counts)?.breaking ?? 0)} breaking, ${field(asRecord(data.counts)?.additive ?? 0)} additive, ${field(asRecord(data.counts)?.ambiguous ?? 0)} ambiguous`;
     case 'init':
       return `Init: ${field(data.written) === 'true' ? 'configuration written' : 'dry run'}`;
     default:
