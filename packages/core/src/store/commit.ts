@@ -3,7 +3,11 @@ import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 
 import type {
+  ArchitectureModuleRecord,
+  ArchitectureViolationRecord,
+  CallRecord,
   ComponentRecord,
+  DependencyRecord,
   ReferenceRecord,
   SymbolRecord,
   VueFileMetaRecord,
@@ -46,6 +50,10 @@ export interface CommitInput {
   files: Iterable<ScannedFile>;
   symbols: Iterable<SymbolRecord>;
   references: Iterable<ReferenceRecord>;
+  dependencies: Iterable<DependencyRecord>;
+  calls: Iterable<CallRecord>;
+  architectureModules: Iterable<ArchitectureModuleRecord>;
+  architectureViolations: Iterable<ArchitectureViolationRecord>;
   mappingRows: Iterable<MappingRow>;
   components: Iterable<ComponentRecord>;
   vueFileMeta: Iterable<VueFileMetaRecord>;
@@ -55,7 +63,13 @@ export interface CommitResult {
   buildId: string;
   fingerprint: string;
   sqliteVersion: string;
-  counts: { files: number; symbols: number; references: number };
+  counts: {
+    files: number;
+    symbols: number;
+    references: number;
+    dependencies: number;
+    calls: number;
+  };
   writeBatches: number;
   rowsWritten: number;
 }
@@ -154,6 +168,10 @@ export function recoverPending(dbPath: string): number {
         const buildId = typeof row.buildId === 'string' ? row.buildId : '';
         if (buildId === '') continue;
         db.prepare('delete from "references" where build_id = ?').run(buildId);
+        db.prepare('delete from dependencies where build_id = ?').run(buildId);
+        db.prepare('delete from calls where build_id = ?').run(buildId);
+        db.prepare('delete from architecture_violations where build_id = ?').run(buildId);
+        db.prepare('delete from architecture_modules where build_id = ?').run(buildId);
         db.prepare('delete from symbol_map where build_id = ?').run(buildId);
         db.prepare('delete from components where build_id = ?').run(buildId);
         db.prepare('delete from vue_file_meta where build_id = ?').run(buildId);
@@ -192,6 +210,10 @@ function pruneBuilds(db: DatabaseSync, keep = 2): void {
   try {
     for (const buildId of old) {
       db.prepare('delete from "references" where build_id = ?').run(buildId);
+      db.prepare('delete from dependencies where build_id = ?').run(buildId);
+      db.prepare('delete from calls where build_id = ?').run(buildId);
+      db.prepare('delete from architecture_violations where build_id = ?').run(buildId);
+      db.prepare('delete from architecture_modules where build_id = ?').run(buildId);
       db.prepare('delete from symbol_map where build_id = ?').run(buildId);
       db.prepare('delete from components where build_id = ?').run(buildId);
       db.prepare('delete from vue_file_meta where build_id = ?').run(buildId);
@@ -221,11 +243,23 @@ function assertClosure(db: DatabaseSync, buildId: string): void {
       'select count(*) as count from "references" r left join symbols s on r.source_symbol_id = s.symbol_id and s.build_id = r.build_id where r.build_id = ? and r.source_symbol_id is not null and s.symbol_id is null',
     )
     .get(buildId) as { count?: unknown };
+  const orphanCaller = db
+    .prepare(
+      'select count(*) as count from calls c left join symbols s on c.caller_symbol_id = s.symbol_id and s.build_id = c.build_id where c.build_id = ? and c.caller_symbol_id is not null and s.symbol_id is null',
+    )
+    .get(buildId) as { count?: unknown };
+  const orphanCallee = db
+    .prepare(
+      'select count(*) as count from calls c left join symbols s on c.callee_symbol_id = s.symbol_id and s.build_id = c.build_id where c.build_id = ? and c.callee_symbol_id is not null and s.symbol_id is null',
+    )
+    .get(buildId) as { count?: unknown };
   const targetCount = typeof orphanTarget.count === 'number' ? orphanTarget.count : -1;
   const sourceCount = typeof orphanSource.count === 'number' ? orphanSource.count : -1;
-  if (targetCount !== 0 || sourceCount !== 0) {
-    throw nexusError('E23', 'reference foreign keys are not closed', {
-      reason: `orphan targets: ${targetCount}, orphan sources: ${sourceCount}`,
+  const callerCount = typeof orphanCaller.count === 'number' ? orphanCaller.count : -1;
+  const calleeCount = typeof orphanCallee.count === 'number' ? orphanCallee.count : -1;
+  if (targetCount !== 0 || sourceCount !== 0 || callerCount !== 0 || calleeCount !== 0) {
+    throw nexusError('E23', 'relation foreign keys are not closed', {
+      reason: `orphan targets: ${targetCount}, orphan sources: ${sourceCount}, orphan callers: ${callerCount}, orphan callees: ${calleeCount}`,
       suggestion:
         'Mapping produced edges to symbols that were not written; fix the indexer before release.',
     });
@@ -247,19 +281,23 @@ export class BuildWriter {
   private readonly insertSymbol: Statement;
   private readonly markCurrentSymbol: Statement;
   private readonly insertReference: Statement;
+  private readonly insertDependency: Statement;
+  private readonly insertCall: Statement;
+  private readonly insertArchitectureModule: Statement;
+  private readonly insertArchitectureViolation: Statement;
   private readonly insertMapping: Statement;
   private readonly insertComponent: Statement;
   private readonly insertVueMeta: Statement;
   private closed = false;
   private rows = 0;
   private batches = 0;
-  private counts = { files: 0, symbols: 0, references: 0 };
+  private counts = { files: 0, symbols: 0, references: 0, dependencies: 0, calls: 0 };
 
   private constructor(db: DatabaseSync, header: CommitInput) {
     this.db = db;
     this.header = header;
     this.insertFile = db.prepare(
-      'insert into files(build_id, path, source_hash, language, size_bytes, status, is_generated) values (?, ?, ?, ?, ?, ?, 0)',
+      'insert into files(build_id, path, source_hash, language, size_bytes, status, is_generated, owner_module) values (?, ?, ?, ?, ?, ?, 0, ?)',
     );
     this.insertSymbol = db.prepare(
       `insert into symbols(symbol_id, build_id, root_id, path, kind, name, name_chain, signature, visibility, is_public, export_kind, analysis_engine, is_type_only, identity_confidence, identity_evidence_json, volatile, anonymous, name_line, name_col, start_line, start_col, end_line, end_col, overload_ordinal, container_locator_key, syntax_context_hash, source_hash, mapping_quality)
@@ -270,6 +308,22 @@ export class BuildWriter {
     );
     this.insertReference = db.prepare(
       `insert into "references"(build_id, target_symbol_id, target_scip_symbol, source_symbol_id, source_file, kind, role, relation_class, confidence, analysis_engine, line, col, unresolved_reason)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    this.insertDependency = db.prepare(
+      `insert into dependencies(build_id, source_file, target_file, source_root_id, target_root_id, source_module, target_module, is_cross_root, dep_type, specifier, relation_class, confidence, analysis_engine, line, col, unresolved_reason, evidence_json)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    this.insertCall = db.prepare(
+      `insert into calls(build_id, caller_symbol_id, callee_symbol_id, caller_file, callee_file, line, col, resolution, relation_class, confidence, analysis_engine, unresolved_reason, evidence_json)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    this.insertArchitectureModule = db.prepare(
+      `insert into architecture_modules(build_id, module_name, include_json, allow_json, file_count, symbol_count)
+       values (?, ?, ?, ?, ?, ?)`,
+    );
+    this.insertArchitectureViolation = db.prepare(
+      `insert into architecture_violations(build_id, rule_id, from_module, to_module, source_file, target_file, line, col, dep_type, relation_class, confidence, analysis_engine, evidence_json)
        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     this.insertMapping = db.prepare(
@@ -335,6 +389,7 @@ export class BuildWriter {
       file.language,
       file.size,
       'indexed',
+      file.ownerModule ?? null,
     );
     this.counts.files += 1;
     this.tick();
@@ -393,6 +448,81 @@ export class BuildWriter {
       reference.unresolvedReason,
     );
     this.counts.references += 1;
+    this.tick();
+  }
+
+  addDependency(dependency: DependencyRecord): void {
+    this.insertDependency.run(
+      this.header.buildId,
+      dependency.sourceFile,
+      dependency.targetFile,
+      dependency.sourceRootId,
+      dependency.targetRootId,
+      dependency.sourceModule ?? null,
+      dependency.targetModule ?? null,
+      dependency.isCrossRoot ? 1 : 0,
+      dependency.depType,
+      dependency.specifier,
+      dependency.relationClass,
+      dependency.confidence,
+      dependency.analysisEngine,
+      dependency.line,
+      dependency.col,
+      dependency.unresolvedReason,
+      JSON.stringify(dependency.evidence),
+    );
+    this.counts.dependencies += 1;
+    this.tick();
+  }
+
+  addCall(call: CallRecord): void {
+    this.insertCall.run(
+      this.header.buildId,
+      call.callerSymbolId,
+      call.calleeSymbolId,
+      call.callerFile,
+      call.calleeFile,
+      call.line,
+      call.col,
+      call.resolution,
+      call.relationClass,
+      call.confidence,
+      call.analysisEngine,
+      call.unresolvedReason,
+      JSON.stringify(call.evidence),
+    );
+    this.counts.calls += 1;
+    this.tick();
+  }
+
+  addArchitectureModule(module: ArchitectureModuleRecord): void {
+    this.insertArchitectureModule.run(
+      this.header.buildId,
+      module.name,
+      JSON.stringify(module.include),
+      JSON.stringify(module.allow),
+      module.fileCount,
+      module.symbolCount,
+    );
+    this.tick();
+  }
+
+  addArchitectureViolation(violation: ArchitectureViolationRecord): void {
+    this.insertArchitectureViolation.run(
+      this.header.buildId,
+      violation.ruleId,
+      violation.fromModule,
+      violation.toModule,
+      violation.sourceFile,
+      violation.targetFile,
+      violation.line,
+      violation.col,
+      violation.depType,
+      violation.relationClass,
+      violation.confidence,
+      violation.analysisEngine,
+      JSON.stringify(violation.evidence),
+    );
     this.tick();
   }
 
@@ -582,6 +712,12 @@ export function commitBuild(input: CommitInput): CommitResult {
     for (const file of input.files) writer.addFile(file);
     for (const symbol of input.symbols) writer.addSymbol(symbol);
     for (const reference of input.references) writer.addReference(reference);
+    for (const dependency of input.dependencies) writer.addDependency(dependency);
+    for (const call of input.calls) writer.addCall(call);
+    for (const module of input.architectureModules) writer.addArchitectureModule(module);
+    for (const violation of input.architectureViolations) {
+      writer.addArchitectureViolation(violation);
+    }
     for (const row of input.mappingRows) writer.addMapping(row);
     for (const component of input.components) writer.addComponent(component);
     for (const meta of input.vueFileMeta) writer.addVueFileMeta(meta);

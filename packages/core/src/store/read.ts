@@ -2,11 +2,16 @@ import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 
 import type {
+  ArchitectureModuleRecord,
+  ArchitectureViolationRecord,
+  CallRecord,
   ComponentEmit,
   ComponentProp,
   ComponentRecord,
   ComponentSlot,
+  DependencyRecord,
   ReferenceRecord,
+  RelationEvidence,
   SymbolRecord,
   VueFileMetaRecord,
 } from '../model.js';
@@ -202,6 +207,13 @@ export function countFiles(store: ReadStore): number {
   return typeof row.count === 'number' ? row.count : 0;
 }
 
+export function fileCovered(store: ReadStore, relativePath: string): boolean {
+  const row = store.db
+    .prepare('select 1 as hit from files where build_id = ? and path = ? limit 1')
+    .get(store.build.buildId, relativePath) as { hit?: unknown } | undefined;
+  return row !== undefined;
+}
+
 function parseJsonArray<T>(value: unknown): T[] {
   if (typeof value !== 'string') return [];
   try {
@@ -271,4 +283,190 @@ export function countComponents(store: ReadStore): number {
     .prepare('select count(*) as count from components where build_id = ?')
     .get(store.build.buildId) as { count?: unknown };
   return typeof row.count === 'number' ? row.count : 0;
+}
+
+function parseEvidence(value: unknown): RelationEvidence {
+  if (typeof value !== 'string') {
+    return { sourceOfTruth: '', analysisVersion: '', constraints: [], missReason: null };
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (typeof parsed !== 'object' || parsed === null) {
+      return { sourceOfTruth: '', analysisVersion: '', constraints: [], missReason: null };
+    }
+    const record = parsed as Record<string, unknown>;
+    return {
+      sourceOfTruth: typeof record.sourceOfTruth === 'string' ? record.sourceOfTruth : '',
+      analysisVersion: typeof record.analysisVersion === 'string' ? record.analysisVersion : '',
+      constraints: Array.isArray(record.constraints)
+        ? record.constraints.filter((entry): entry is string => typeof entry === 'string')
+        : [],
+      missReason: typeof record.missReason === 'string' ? record.missReason : null,
+    };
+  } catch {
+    return { sourceOfTruth: '', analysisVersion: '', constraints: [], missReason: null };
+  }
+}
+
+export interface DependencyFilter {
+  sourcePrefix?: string | null;
+  targetPrefix?: string | null;
+  depTypes?: readonly string[] | null;
+  reverse?: boolean;
+  crossRootOnly?: boolean;
+  limit?: number;
+}
+
+export function readDependencies(store: ReadStore, filter: DependencyFilter): DependencyRecord[] {
+  const clauses: string[] = ['build_id = ?'];
+  const params: Array<string | number> = [store.build.buildId];
+  if (
+    filter.sourcePrefix !== undefined &&
+    filter.sourcePrefix !== null &&
+    filter.sourcePrefix !== ''
+  ) {
+    if (filter.reverse === true) {
+      clauses.push('target_file like ?');
+    } else {
+      clauses.push('source_file like ?');
+    }
+    params.push(`${filter.sourcePrefix}%`);
+  }
+  if (
+    filter.targetPrefix !== undefined &&
+    filter.targetPrefix !== null &&
+    filter.targetPrefix !== ''
+  ) {
+    clauses.push('target_file like ?');
+    params.push(`${filter.targetPrefix}%`);
+  }
+  if (filter.depTypes !== undefined && filter.depTypes !== null && filter.depTypes.length > 0) {
+    clauses.push(`dep_type in (${filter.depTypes.map(() => '?').join(', ')})`);
+    params.push(...filter.depTypes);
+  }
+  if (filter.crossRootOnly === true) clauses.push('is_cross_root = 1');
+  const limit = Math.min(Math.max(filter.limit ?? 5000, 1), 20000);
+  params.push(limit);
+  const rows = store.db
+    .prepare(
+      `select source_file, target_file, source_root_id, target_root_id, source_module, target_module,
+              is_cross_root, dep_type, specifier, relation_class, confidence, analysis_engine,
+              line, col, unresolved_reason, evidence_json
+       from dependencies where ${clauses.join(' and ')}
+       order by source_file, line, col, dep_type, target_file limit ?`,
+    )
+    .all(...params) as Array<Record<string, unknown>>;
+  return rows.map((row) => ({
+    sourceFile: String(row.source_file ?? ''),
+    targetFile: typeof row.target_file === 'string' ? row.target_file : null,
+    sourceRootId: String(row.source_root_id ?? ''),
+    targetRootId: typeof row.target_root_id === 'string' ? row.target_root_id : null,
+    sourceModule: typeof row.source_module === 'string' ? row.source_module : null,
+    targetModule: typeof row.target_module === 'string' ? row.target_module : null,
+    isCrossRoot: Number(row.is_cross_root ?? 0) === 1,
+    depType: String(row.dep_type ?? 'import') as DependencyRecord['depType'],
+    specifier: String(row.specifier ?? ''),
+    relationClass: String(row.relation_class ?? 'certain') as DependencyRecord['relationClass'],
+    confidence: String(row.confidence ?? 'typed') as DependencyRecord['confidence'],
+    analysisEngine: String(row.analysis_engine ?? ''),
+    line: Number(row.line ?? 0),
+    col: Number(row.col ?? 0),
+    unresolvedReason: typeof row.unresolved_reason === 'string' ? row.unresolved_reason : null,
+    evidence: parseEvidence(row.evidence_json),
+  }));
+}
+
+export function countDependencies(store: ReadStore): number {
+  const row = store.db
+    .prepare('select count(*) as count from dependencies where build_id = ?')
+    .get(store.build.buildId) as { count?: unknown };
+  return typeof row.count === 'number' ? row.count : 0;
+}
+
+export interface CallFilter {
+  callerSymbolId?: string | null;
+  calleeSymbolId?: string | null;
+  limit?: number;
+}
+
+export function readCalls(store: ReadStore, filter: CallFilter): CallRecord[] {
+  const clauses: string[] = ['build_id = ?'];
+  const params: Array<string | number> = [store.build.buildId];
+  if (filter.callerSymbolId !== undefined && filter.callerSymbolId !== null) {
+    clauses.push('caller_symbol_id = ?');
+    params.push(filter.callerSymbolId);
+  }
+  if (filter.calleeSymbolId !== undefined && filter.calleeSymbolId !== null) {
+    clauses.push('callee_symbol_id = ?');
+    params.push(filter.calleeSymbolId);
+  }
+  const limit = Math.min(Math.max(filter.limit ?? 5000, 1), 20000);
+  params.push(limit);
+  const rows = store.db
+    .prepare(
+      `select caller_symbol_id, callee_symbol_id, caller_file, callee_file, line, col,
+              resolution, relation_class, confidence, analysis_engine, unresolved_reason, evidence_json
+       from calls where ${clauses.join(' and ')}
+       order by caller_file, line, col, callee_symbol_id limit ?`,
+    )
+    .all(...params) as Array<Record<string, unknown>>;
+  return rows.map((row) => ({
+    callerSymbolId: typeof row.caller_symbol_id === 'string' ? row.caller_symbol_id : null,
+    calleeSymbolId: typeof row.callee_symbol_id === 'string' ? row.callee_symbol_id : null,
+    callerFile: String(row.caller_file ?? ''),
+    calleeFile: typeof row.callee_file === 'string' ? row.callee_file : null,
+    line: Number(row.line ?? 0),
+    col: Number(row.col ?? 0),
+    resolution: String(row.resolution ?? 'unresolved') as CallRecord['resolution'],
+    relationClass: String(row.relation_class ?? 'certain') as CallRecord['relationClass'],
+    confidence: String(row.confidence ?? 'typed') as CallRecord['confidence'],
+    analysisEngine: String(row.analysis_engine ?? ''),
+    unresolvedReason: typeof row.unresolved_reason === 'string' ? row.unresolved_reason : null,
+    evidence: parseEvidence(row.evidence_json),
+  }));
+}
+
+export function readArchitectureModules(store: ReadStore): ArchitectureModuleRecord[] {
+  const rows = store.db
+    .prepare(
+      `select module_name, include_json, allow_json, file_count, symbol_count
+       from architecture_modules where build_id = ? order by module_name`,
+    )
+    .all(store.build.buildId) as Array<Record<string, unknown>>;
+  return rows.map((row) => ({
+    name: String(row.module_name ?? ''),
+    include: parseStringArray(row.include_json),
+    allow:
+      row.allow_json === 'null' || row.allow_json === null
+        ? null
+        : parseStringArray(row.allow_json),
+    fileCount: Number(row.file_count ?? 0),
+    symbolCount: Number(row.symbol_count ?? 0),
+  }));
+}
+
+export function readArchitectureViolations(store: ReadStore): ArchitectureViolationRecord[] {
+  const rows = store.db
+    .prepare(
+      `select rule_id, from_module, to_module, source_file, target_file, line, col, dep_type,
+              relation_class, confidence, analysis_engine, evidence_json
+       from architecture_violations where build_id = ? order by rule_id, source_file, line`,
+    )
+    .all(store.build.buildId) as Array<Record<string, unknown>>;
+  return rows.map((row) => ({
+    ruleId: String(row.rule_id ?? ''),
+    fromModule: String(row.from_module ?? ''),
+    toModule: String(row.to_module ?? ''),
+    sourceFile: String(row.source_file ?? ''),
+    targetFile: String(row.target_file ?? ''),
+    line: Number(row.line ?? 0),
+    col: Number(row.col ?? 0),
+    depType: String(row.dep_type ?? 'import') as ArchitectureViolationRecord['depType'],
+    relationClass: String(
+      row.relation_class ?? 'certain',
+    ) as ArchitectureViolationRecord['relationClass'],
+    confidence: String(row.confidence ?? 'typed') as ArchitectureViolationRecord['confidence'],
+    analysisEngine: String(row.analysis_engine ?? ''),
+    evidence: parseEvidence(row.evidence_json),
+  }));
 }

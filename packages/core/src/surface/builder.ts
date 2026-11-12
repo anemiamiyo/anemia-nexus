@@ -178,6 +178,8 @@ export interface BuildSurfaceInput {
   components: readonly ComponentRecord[];
   config: SurfaceConfig;
   sinceByKey?: ReadonlyMap<string, string>;
+  /** Explicit architecture module per project-relative file; null/absent = unknown. */
+  moduleByPath?: ReadonlyMap<string, string>;
 }
 
 export function buildSurface(input: BuildSurfaceInput): SurfaceRootSnapshot {
@@ -440,7 +442,7 @@ export function buildSurface(input: BuildSurfaceInput): SurfaceRootSnapshot {
       derived: group.derived,
       stability,
       since,
-      ownerModule: null,
+      ownerModule: input.moduleByPath?.get((group.symbols[0] as SymbolRecord).path) ?? null,
       docLink: docLinkOf(tags),
       symbolId,
       identityConfidence: group.symbols.some((symbol) => symbol.identityConfidence === 'high')

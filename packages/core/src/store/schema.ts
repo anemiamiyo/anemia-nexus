@@ -2,10 +2,12 @@
  * Declarative schema. `schemaVersion` and the DDL live in this one module
  * (docs/05-data-model.md 5.5). Phase 02 adds the Vue tables required by
  * docs/04-architecture.md 4.1.1 and the Component entity of
- * docs/05-data-model.md 5.1; existing Phase 01 column semantics are unchanged.
- * Incompatible changes require a new version and a rebuild.
+ * docs/05-data-model.md 5.1; Phase 04 adds the relation-graph and architecture
+ * tables of docs/05-data-model.md 5.1/5.6 (Dependency, CallRelation,
+ * ArchitectureModule). Incompatible changes require a new version and a
+ * rebuild; no migration is provided.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const DDL_CURRENT = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -43,6 +45,8 @@ CREATE TABLE IF NOT EXISTS files (
   size_bytes INTEGER NOT NULL,
   status TEXT NOT NULL,
   is_generated INTEGER NOT NULL DEFAULT 0,
+  /** Architecture module from explicit config (docs/phase-04/00-entry-and-decisions.md 3.2). */
+  owner_module TEXT,
   UNIQUE (build_id, path)
 ) STRICT;
 
@@ -163,6 +167,82 @@ CREATE TABLE IF NOT EXISTS components (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS components_name_idx ON components (name);
+
+CREATE TABLE IF NOT EXISTS dependencies (
+  dep_id INTEGER PRIMARY KEY,
+  build_id TEXT NOT NULL,
+  source_file TEXT NOT NULL,
+  target_file TEXT,
+  source_root_id TEXT NOT NULL,
+  target_root_id TEXT,
+  source_module TEXT,
+  target_module TEXT,
+  is_cross_root INTEGER NOT NULL DEFAULT 0,
+  dep_type TEXT NOT NULL,
+  specifier TEXT NOT NULL,
+  relation_class TEXT NOT NULL,
+  confidence TEXT NOT NULL,
+  analysis_engine TEXT NOT NULL,
+  line INTEGER NOT NULL,
+  col INTEGER NOT NULL,
+  unresolved_reason TEXT,
+  evidence_json TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS dependencies_build_source_idx ON dependencies (build_id, source_file);
+CREATE INDEX IF NOT EXISTS dependencies_source_idx ON dependencies (source_file);
+CREATE INDEX IF NOT EXISTS dependencies_target_idx ON dependencies (target_file);
+
+CREATE TABLE IF NOT EXISTS calls (
+  call_id INTEGER PRIMARY KEY,
+  build_id TEXT NOT NULL,
+  caller_symbol_id TEXT,
+  callee_symbol_id TEXT,
+  caller_file TEXT NOT NULL,
+  callee_file TEXT,
+  line INTEGER NOT NULL,
+  col INTEGER NOT NULL,
+  resolution TEXT NOT NULL,
+  relation_class TEXT NOT NULL,
+  confidence TEXT NOT NULL,
+  analysis_engine TEXT NOT NULL,
+  unresolved_reason TEXT,
+  evidence_json TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS calls_caller_idx ON calls (caller_symbol_id);
+CREATE INDEX IF NOT EXISTS calls_callee_idx ON calls (callee_symbol_id);
+CREATE INDEX IF NOT EXISTS calls_build_caller_idx ON calls (build_id, caller_symbol_id);
+
+CREATE TABLE IF NOT EXISTS architecture_modules (
+  build_id TEXT NOT NULL,
+  module_name TEXT NOT NULL,
+  include_json TEXT NOT NULL,
+  allow_json TEXT NOT NULL,
+  file_count INTEGER NOT NULL,
+  symbol_count INTEGER NOT NULL,
+  PRIMARY KEY (build_id, module_name)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS architecture_violations (
+  violation_id INTEGER PRIMARY KEY,
+  build_id TEXT NOT NULL,
+  rule_id TEXT NOT NULL,
+  from_module TEXT NOT NULL,
+  to_module TEXT NOT NULL,
+  source_file TEXT NOT NULL,
+  target_file TEXT NOT NULL,
+  line INTEGER NOT NULL,
+  col INTEGER NOT NULL,
+  dep_type TEXT NOT NULL,
+  relation_class TEXT NOT NULL,
+  confidence TEXT NOT NULL,
+  analysis_engine TEXT NOT NULL,
+  evidence_json TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS architecture_violations_from_idx ON architecture_violations (build_id, from_module);
+CREATE INDEX IF NOT EXISTS architecture_violations_to_idx ON architecture_violations (build_id, to_module);
 `;
 
 export interface RequiredIndex {
@@ -170,13 +250,18 @@ export interface RequiredIndex {
   columns: string[];
 }
 
-/** Required indexes from docs/05-data-model.md 5.6; Phase 01 omits `dependencies`. */
+/** Required indexes from docs/05-data-model.md 5.6; Phase 04 adds graph tables. */
 export const REQUIRED_INDEXES: readonly RequiredIndex[] = [
   { table: 'references', columns: ['target_symbol_id'] },
   { table: 'references', columns: ['source_symbol_id'] },
   { table: 'symbols', columns: ['name'] },
+  { table: 'symbols', columns: ['symbol_id'] },
   { table: 'symbols', columns: ['root_id', 'path'] },
   { table: 'symbol_map', columns: ['symbol_id', 'engine'] },
   { table: 'symbol_map', columns: ['engine', 'engine_ref'] },
   { table: 'symbol_id_history', columns: ['symbol_id', 'valid_from_build'] },
+  { table: 'dependencies', columns: ['source_file'] },
+  { table: 'dependencies', columns: ['target_file'] },
+  { table: 'calls', columns: ['caller_symbol_id'] },
+  { table: 'calls', columns: ['callee_symbol_id'] },
 ];

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import type { Coverage, StalenessState, VueAnalysisSummary } from '../model.js';
+import type { BlindSpot, Coverage, StalenessState, VueAnalysisSummary } from '../model.js';
 import type { ANALYZER_VERSION } from '../index/analyzer.js';
 
 export interface ManifestCoverage extends Coverage {
@@ -17,6 +17,7 @@ export interface ManifestTimings {
   vueMs: number;
   scipMs: number;
   mapMs: number;
+  graphMs?: number;
   writeMs: number;
   writeBatches: number;
   totalMs: number;
@@ -46,9 +47,21 @@ export interface RootManifest {
     symbols: number;
     references: number;
     unresolvedReferences: number;
+    dependencies?: number;
+    calls?: number;
   };
   coverage: ManifestCoverage;
   vue?: VueAnalysisSummary;
+  graph?: {
+    dependencies: number;
+    calls: number;
+    styleEdges: number;
+    crossRootEdges: number;
+    architectureViolations: number;
+    byConfidence: Record<string, number>;
+    byType: Record<string, number>;
+  };
+  blindSpots?: BlindSpot[];
   surfaceHash?: string;
   surfaceEntries?: number;
   stats: {

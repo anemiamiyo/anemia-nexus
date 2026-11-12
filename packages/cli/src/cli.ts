@@ -14,11 +14,13 @@ import {
   queryReferences,
   querySearch,
   querySymbol,
+  queryDependencies,
   statusReport,
   writeBaselineSnapshot,
   diffCurrentSurface,
   type BuildProgressEvent,
   type Coverage,
+  type DependencyQueryType,
   type QueryEnvelope,
   type StatusReport,
 } from 'anemia-core';
@@ -739,9 +741,63 @@ export function buildProgram(): Command {
     });
   });
 
+  const deps = addExamples(
+    program
+      .command('deps [target]')
+      .description('dependency, module, style or static call relations')
+      .helpGroup('Query')
+      .option('--reverse', 'show incoming edges')
+      .option('--type <type>', 'file|module|style|call', 'file'),
+    [
+      'nex deps src/core/useOverlay.ts',
+      'nex deps src/styles/theme.scss --type style --reverse',
+      'nex deps --type module core',
+      'nex deps --type call useOverlay --reverse --explain',
+    ],
+  );
+  deps.action(async (target: string | undefined, _options, command: Command) => {
+    await execute(command, async (context) => {
+      const opts = command.optsWithGlobals() as Record<string, unknown>;
+      const type = typeof opts.type === 'string' ? opts.type : 'file';
+      if (!['file', 'module', 'style', 'call'].includes(type)) {
+        throw nexusError('E00', 'invalid --type value', {
+          reason: `expected file, module, style or call, received ${JSON.stringify(type)}`,
+          suggestion: 'Use --type file|module|style|call.',
+        });
+      }
+      const result = await queryDependencies(
+        {
+          projectRoot: context.projectRoot,
+          cwd: context.cwd,
+          rootId: context.root,
+          roots: context.roots,
+          trustConfig: context.trustConfig,
+        },
+        target ?? '',
+        type as DependencyQueryType,
+        opts.reverse === true,
+      );
+      return {
+        data: {
+          command: 'deps',
+          type: result.type,
+          target: result.target,
+          reverse: result.reverse,
+          ...envelopeFields(result.envelope),
+          architecture: {
+            modules: result.data.modules,
+            violations: result.data.violations,
+          },
+          blindSpots: result.data.blindSpots,
+          crossRootEdges: result.data.crossRootEdges,
+        },
+        exitCode: 0,
+      };
+    });
+  });
+
   const stubs: Array<[string, string, string]> = [
     ['update', 'incremental update (not provided)', 'Lifecycle'],
-    ['deps', 'dependency and architecture view (not provided)', 'Query'],
     ['impact', 'change impact analysis (not provided)', 'Query'],
     ['context', 'layered context packets (not provided)', 'Query'],
     ['similar', 'similar API search (not provided)', 'Governance'],
@@ -800,7 +856,7 @@ Compatibility aliases (not shown above):
   agents       -> print agents
   skill        -> print skill
 
-Phase 03 implements: init, build, status, doctor, symbol, references, search, api-snapshot, api-diff.
+Phase 04 implements: init, build, status, doctor, symbol, references, search, deps, api-snapshot, api-diff.
 Other commands return E24 "not provided"; they never return fake data.
 `,
   );

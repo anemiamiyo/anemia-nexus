@@ -67,7 +67,7 @@ export type {
 export { runDoctor, unsupportedDoctorFlag } from './doctor.js';
 export type { DoctorReport, DoctorCheck, DoctorOptions, CheckStatus } from './doctor.js';
 export { dumpVueMap } from './vue/dump.js';
-export { querySymbol, queryReferences, querySearch } from './query/service.js';
+export { querySymbol, queryReferences, querySearch, queryDependencies } from './query/service.js';
 export type {
   QueryOptions,
   SymbolItem,
@@ -76,6 +76,9 @@ export type {
   SymbolQueryResult,
   ReferencesQueryResult,
   SearchQueryResult,
+  DependencyQueryType,
+  DependencyItem,
+  DependencyQueryResult,
 } from './query/service.js';
 export { openReadStore } from './store/read.js';
 export { probeSqlite } from './store/db.js';
@@ -86,6 +89,9 @@ export type {
   StalenessState,
   SymbolRecord,
   ReferenceRecord,
+  DependencyRecord,
+  CallRecord,
+  BlindSpot,
 } from './model.js';
 export { stableStringify } from './util/stable-json.js';
 export { contentHash, sha256Hex, sha256Base32 } from './util/hash.js';

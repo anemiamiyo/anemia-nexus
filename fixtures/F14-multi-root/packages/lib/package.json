@@ -1,0 +1,11 @@
+{
+  "name": "@f14/lib",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts"
+    }
+  }
+}

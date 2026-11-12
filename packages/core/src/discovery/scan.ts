@@ -9,7 +9,7 @@ import { contentHash } from '../util/hash.js';
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const VUE_EXTENSION = '.vue';
 
-export type FileLanguage = 'ts' | 'tsx' | 'vue';
+export type FileLanguage = 'ts' | 'tsx' | 'vue' | 'css' | 'scss' | 'less';
 
 export interface ScannedFile {
   /** Project-relative POSIX path. */
@@ -18,6 +18,8 @@ export interface ScannedFile {
   sourceHash: string;
   size: number;
   language: FileLanguage;
+  /** Architecture module from explicit config; null when unassigned. */
+  ownerModule?: string | null;
 }
 
 export interface ScanProblem {
@@ -43,6 +45,9 @@ export interface ScanOptions {
   tsconfigFileNames?: readonly string[];
   /** Phase 02: discover `.vue` files (default true; false keeps TS-only scans). */
   scanVue?: boolean;
+  /** Phase 04: discover `.css` / `.scss` / `.less` (default true). */
+  scanStyles?: boolean;
+  styleExtensions?: readonly string[];
 }
 
 export function fileLanguage(fileName: string): FileLanguage | null {
@@ -50,7 +55,14 @@ export function fileLanguage(fileName: string): FileLanguage | null {
   if (extension === '.ts') return 'ts';
   if (extension === '.tsx') return 'tsx';
   if (extension === VUE_EXTENSION) return 'vue';
+  if (extension === '.css') return 'css';
+  if (extension === '.scss') return 'scss';
+  if (extension === '.less') return 'less';
   return null;
+}
+
+export function isStyleLanguage(language: FileLanguage): language is 'css' | 'scss' | 'less' {
+  return language === 'css' || language === 'scss' || language === 'less';
 }
 
 function realpathInside(projectRoot: string, rootPath: string, filePath: string): boolean {
@@ -120,16 +132,28 @@ function shouldSkipFile(
 }
 
 /**
- * Deterministic discovery of `.vue` files. `tsconfig.fileNames` never contains
- * `.vue`, so SFCs are always discovered by walking the root; the same ignore /
- * sensitive-file / symlink / size rules apply.
+ * Deterministic discovery of `.vue` / style files. `tsconfig.fileNames` never
+ * contains them, so they are always discovered by walking the root; the same
+ * ignore / sensitive-file / symlink / size rules apply.
  */
-function scanVueFiles(
+function scanAuxFiles(
   options: ScanOptions,
   projectRootAbs: string,
   result: ScanResult,
   seen: Set<string>,
 ): void {
+  const scanVue = options.scanVue !== false;
+  const scanStyles = options.scanStyles !== false;
+  const styleExtensions = new Set(
+    (options.styleExtensions ?? ['.css', '.scss', '.less']).map((entry) => entry.toLowerCase()),
+  );
+  const wanted = (language: FileLanguage): boolean => {
+    if (language === 'vue') return scanVue;
+    if (isStyleLanguage(language)) {
+      return scanStyles && styleExtensions.has(`.${language}`);
+    }
+    return false;
+  };
   const stack: Array<{ absolute: string; relative: string }> = [
     { absolute: options.absoluteRoot, relative: '' },
   ];
@@ -160,7 +184,9 @@ function scanVueFiles(
         stack.push({ absolute: childAbsolute, relative: childRelative });
         continue;
       }
-      if (!entry.isFile() || fileLanguage(entry.name) !== 'vue') continue;
+      if (!entry.isFile()) continue;
+      const language = fileLanguage(entry.name);
+      if (language === null || !wanted(language)) continue;
       if (isSensitiveFile(entry.name) || options.ignore.isFileIgnored(childRelative)) {
         result.filesIgnored += 1;
         continue;
@@ -179,6 +205,7 @@ function scanVueFiles(
 export function scanFiles(options: ScanOptions): ScanResult {
   const { projectRoot, absoluteRoot, ignore, tsconfigFileNames } = options;
   const scanVue = options.scanVue !== false;
+  const scanStyles = options.scanStyles !== false;
   const result: ScanResult = {
     files: [],
     filesIgnored: 0,
@@ -196,7 +223,7 @@ export function scanFiles(options: ScanOptions): ScanResult {
     );
     for (const fileName of sorted) {
       const language = fileLanguage(fileName);
-      if (language === null || language === 'vue') continue;
+      if (language === null || language === 'vue' || isStyleLanguage(language)) continue;
       const absolutePath = path.resolve(fileName);
       const relative = toPosix(path.relative(projectRootAbs, absolutePath));
       if (relative.startsWith('..') || path.isAbsolute(relative)) {
@@ -215,7 +242,7 @@ export function scanFiles(options: ScanOptions): ScanResult {
       seen.add(relative);
       readScannedFile(projectRootAbs, absoluteRoot, absolutePath, result, seen);
     }
-    if (scanVue) scanVueFiles(options, projectRootAbs, result, seen);
+    if (scanVue || scanStyles) scanAuxFiles(options, projectRootAbs, result, seen);
   } else {
     const stack: Array<{ absolute: string; relative: string }> = [
       { absolute: absoluteRoot, relative: '' },
@@ -249,7 +276,9 @@ export function scanFiles(options: ScanOptions): ScanResult {
         }
         if (!entry.isFile()) continue;
         const language = fileLanguage(entry.name);
-        if (language === null || (language === 'vue' && !scanVue)) continue;
+        if (language === null) continue;
+        if (language === 'vue' && !scanVue) continue;
+        if (isStyleLanguage(language) && !scanStyles) continue;
         if (isSensitiveFile(entry.name) || ignore.isFileIgnored(childRelative)) {
           result.filesIgnored += 1;
           continue;

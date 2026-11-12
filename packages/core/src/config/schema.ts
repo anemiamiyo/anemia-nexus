@@ -82,6 +82,21 @@ export const vueSchema = z.strictObject({
   typeResolver: z.string().min(1).nullable().default(null),
 });
 
+/**
+ * Explicit architecture modules (docs/phase-04/00-entry-and-decisions.md 3.2).
+ * No directory-name inference: a file belongs to a module only when an
+ * explicit include pattern matches it.
+ */
+export const architectureModuleSchema = z.strictObject({
+  name: z.string().min(1).max(120),
+  include: z.array(safeRelativePattern).min(1),
+  allow: z.array(z.string().min(1)).optional(),
+});
+
+export const architectureSchema = z.strictObject({
+  modules: z.array(architectureModuleSchema).default([]),
+});
+
 export const commandSchema = z.strictObject({
   id: z.string().min(1),
   cmd: z.string().min(1),
@@ -100,6 +115,7 @@ export const configSchema = z.strictObject({
   workspaces: workspacesSchema.default(() => workspacesSchema.parse({})),
   roots: z.record(z.string(), rootOverrideSchema).default({}),
   style: styleSchema.default(() => styleSchema.parse({})),
+  architecture: architectureSchema.default(() => architectureSchema.parse({})),
   surface: surfaceSchema.default(() => surfaceSchema.parse({})),
   vue: vueSchema.default(() => vueSchema.parse({})),
   commands: commandsSchema.default(() => commandsSchema.parse({})),
@@ -111,6 +127,8 @@ export type BudgetsConfig = z.infer<typeof budgetsSchema>;
 export type OutputConfig = z.infer<typeof outputSchema>;
 export type SurfaceConfig = z.infer<typeof surfaceSchema>;
 export type SurfaceManualConfig = z.infer<typeof surfaceManualSchema>;
+export type ArchitectureConfig = z.infer<typeof architectureSchema>;
+export type ArchitectureModuleConfig = z.infer<typeof architectureModuleSchema>;
 export type WorkspacesConfig = z.infer<typeof workspacesSchema>;
 export type CommandConfig = z.infer<typeof commandSchema>;
 export type RootOverride = z.infer<typeof rootOverrideSchema>;

@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { IgnoreConfig } from '../config/schema.js';
 import { toPosix } from '../util/paths.js';
 
-function globToRegExp(pattern: string): RegExp {
+export function globToRegExp(pattern: string): RegExp {
   let source = '^';
   for (let index = 0; index < pattern.length; index += 1) {
     const char = pattern[index] as string;

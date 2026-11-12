@@ -1,0 +1,31 @@
+{
+  "app": {
+    "certain": [
+      {
+        "specifier": "@f14/ui",
+        "targetRoot": "f14-ui",
+        "targetFile": "packages/ui/src/index.ts",
+        "depType": "cross-package",
+        "analysisEngine": "package-boundary"
+      }
+    ],
+    "unresolved": [
+      {
+        "specifier": "@f14/ui/nope",
+        "reason": "package-boundary:exports-mismatch"
+      },
+      {
+        "specifier": "@f14/ghost",
+        "reason": "package-boundary:root-not-indexed"
+      },
+      {
+        "specifier": "@f14/lib",
+        "reason": "package-boundary:undeclared-dependency"
+      },
+      {
+        "specifier": "@outside/thing",
+        "reason": "outside-root"
+      }
+    ]
+  }
+}

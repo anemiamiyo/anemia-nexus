@@ -105,7 +105,7 @@ describe('lifecycle commands', () => {
       };
       expect(payload.state).toBe('uninitialized');
       expect(payload.staleness).toBe('uninitialized');
-      expect(payload.capabilities.styleDependency).toBe('none');
+      expect(payload.capabilities.styleDependency).toBe('file-level');
     } finally {
       cleanup(directory);
     }
@@ -173,6 +173,44 @@ describe('lifecycle commands', () => {
       expect(statusPayload.state).toBe('ready');
       expect(statusPayload.staleness).toBe('fresh');
 
+      const deps = await runCli(['deps', 'src/consumer.ts', '--format', 'json'], directory);
+      expect(deps.code).toBe(0);
+      const depsPayload = JSON.parse(deps.stdout) as {
+        counts: { total: number; certain: number };
+        items: Array<{ depType: string; evidence: unknown }>;
+      };
+      expect(depsPayload.counts.total).toBeGreaterThanOrEqual(5);
+      expect(depsPayload.counts.certain).toBe(depsPayload.counts.total);
+      expect(depsPayload.items.some((item) => item.depType === 'import')).toBe(true);
+      expect(depsPayload.items.every((item) => item.evidence !== null)).toBe(true);
+
+      const depsMarkdown = await runCli(
+        ['deps', 'src/consumer.ts', '--format', 'markdown'],
+        directory,
+      );
+      expect(depsMarkdown.code).toBe(0);
+      expect(depsMarkdown.stdout).toContain(`counts.total=${depsPayload.counts.total}`);
+      expect(depsMarkdown.stdout).not.toContain('\u001b');
+      const depsPretty = await runCli(
+        ['deps', 'src/consumer.ts', '--format', 'pretty', '--explain'],
+        directory,
+      );
+      expect(depsPretty.code).toBe(0);
+      expect(depsPretty.stdout).toContain(`counts.total=${depsPayload.counts.total}`);
+      expect(depsPretty.stdout).toContain('sourceOfTruth');
+      expect(depsPretty.stdout).not.toContain('\u001b');
+
+      const calls = await runCli(
+        ['deps', '--type', 'call', 'add', '--reverse', '--format', 'lines'],
+        directory,
+      );
+      expect(calls.code).toBe(0);
+      expect(calls.stdout).toContain('counts.total=2');
+      expect(calls.stdout).toContain('useAll -> add');
+
+      const badType = await runCli(['deps', '--type', 'bogus', 'x'], directory);
+      expect(badType.code).toBe(64);
+
       const json = await runCli(['references', 'add', '--format', 'json'], directory);
       expect(json.code).toBe(0);
       const jsonPayload = JSON.parse(json.stdout) as {
@@ -214,7 +252,7 @@ describe('lifecycle commands', () => {
   it('never returns fake success for unimplemented commands', async () => {
     const directory = makeEmptyProject('cli-stub');
     try {
-      for (const command of ['update', 'deps', 'impact', 'mcp', 'print', 'test']) {
+      for (const command of ['update', 'impact', 'mcp', 'print', 'test']) {
         const result = await runCli([command, '--format', 'json'], directory);
         expect(result.code).toBe(1);
         expect(result.stdout).toContain('E24');

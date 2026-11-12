@@ -136,7 +136,7 @@ function statusLines(data: Row): string[] {
   lines.push(`activeRoot ${str(data.activeRoot, '-')}`);
   for (const root of rowsOf(data, 'roots')) {
     lines.push(
-      `root ${str(root.rootId)}  ${str(root.rootPath)}  ${str(root.state)}/${str(root.staleness)}  files=${field(root.files)} symbols=${field(root.symbols)} refs=${field(root.references)}  build=${str(root.buildFingerprintPrefix, '-')}  surface=${field(root.surfaceEntries)}`,
+      `root ${str(root.rootId)}  ${str(root.rootPath)}  ${str(root.state)}/${str(root.staleness)}  files=${field(root.files)} symbols=${field(root.symbols)} refs=${field(root.references)} deps=${field(root.dependencies)} calls=${field(root.calls)}  build=${str(root.buildFingerprintPrefix, '-')}  surface=${field(root.surfaceEntries)}`,
     );
     if (Array.isArray(root.staleReason) && root.staleReason.length > 0) {
       lines.push(`  staleReason ${root.staleReason.map((entry) => String(entry)).join(', ')}`);
@@ -151,7 +151,7 @@ function statusLines(data: Row): string[] {
   const capabilities = asRecord(data.capabilities);
   if (capabilities) {
     lines.push(
-      `capabilities styleDependency=${field(capabilities.styleDependency)} styleSelector=${field(capabilities.styleSelector)} htmlFileRef=${field(capabilities.htmlFileRef)} vue=${field(capabilities.vue)} templateReferences=${field(capabilities.templateReferences)} apiSurface=${field(capabilities.apiSurface)} incremental=${field(capabilities.incremental)} mcpFormats=${field(capabilities.mcpFormats)}`,
+      `capabilities styleDependency=${field(capabilities.styleDependency)} styleSelector=${field(capabilities.styleSelector)} htmlFileRef=${field(capabilities.htmlFileRef)} vue=${field(capabilities.vue)} templateReferences=${field(capabilities.templateReferences)} apiSurface=${field(capabilities.apiSurface)} dependencyGraph=${field(capabilities.dependencyGraph)} callGraph=${field(capabilities.callGraph)} architectureRules=${field(capabilities.architectureRules)} incremental=${field(capabilities.incremental)} mcpFormats=${field(capabilities.mcpFormats)}`,
     );
   }
   validateLineLength(lines, 0);
@@ -232,10 +232,64 @@ function buildLines(data: Row): string[] {
   return lines;
 }
 
+function depsLines(data: Row): string[] {
+  const lines: string[] = [];
+  for (const item of rowsOf(data)) {
+    const relationClass = str(item.relationClass, 'certain');
+    const prefix =
+      relationClass === 'dynamic-unresolved' ? '!' : relationClass === 'heuristic' ? '?' : ' ';
+    const kind = str(item.kind, 'dependency');
+    if (kind === 'module-edge') {
+      lines.push(
+        `  module ${str(item.sourceFile)} -> ${str(item.targetFile)}  ${str(item.depType)}  edges=${field(item.edgeCount ?? 0)}  ${relationClass}  ${field(item.edgeCounts ?? {})}`,
+      );
+      continue;
+    }
+    if (kind === 'violation') {
+      lines.push(
+        `${prefix} violation ${str(item.ruleId)}  ${str(item.sourceFile)}:${field(item.line)}:${field(item.col)}  ${str(item.sourceModule)} -> ${str(item.targetModule)}  ${str(item.depType)}`,
+      );
+      continue;
+    }
+    if (kind === 'call') {
+      const callee = str(item.calleeName) || str(item.calleeSymbolId) || '<unresolved>';
+      lines.push(
+        `${prefix} call ${str(item.sourceFile)}:${field(item.line)}:${field(item.col)}  ${str(item.callerName) || '<top-level>'} -> ${callee}  ${relationClass}  ${str(item.confidence)}  ${str(item.unresolvedReason, '-')}`,
+      );
+      continue;
+    }
+    const target =
+      str(item.targetFile) ||
+      `${str(item.specifier, '?')} (${str(item.unresolvedReason, 'unresolved')})`;
+    lines.push(
+      `${prefix} ${str(item.sourceFile)}:${field(item.line)}:${field(item.col)}  ${str(item.depType)} -> ${target}  ${relationClass}  ${str(item.confidence)}  ${str(item.unresolvedReason, '-')}`,
+    );
+  }
+  const architecture = asRecord(data.architecture);
+  if (architecture !== null) {
+    const modules = Array.isArray(architecture.modules) ? architecture.modules.length : 0;
+    const violations = Array.isArray(architecture.violations) ? architecture.violations.length : 0;
+    lines.push(`architecture modules=${modules} violations=${violations}`);
+  }
+  const blindSpots = Array.isArray(data.blindSpots) ? data.blindSpots : [];
+  if (blindSpots.length > 0) {
+    for (const spot of blindSpots) {
+      const record = asRecord(spot);
+      if (record === null) continue;
+      lines.push(
+        `blindSpot ${str(record.category)}/${str(record.missReason)} files=${field(record.affectedFiles)} symbols=${field(record.potentiallyAffectedSymbols)} hint=${str(record.manualCheckHint)}`,
+      );
+    }
+  }
+  return lines;
+}
+
 function entriesFor(command: string, data: Row): string[] {
   switch (command) {
     case 'references':
       return referenceLines(data);
+    case 'deps':
+      return depsLines(data);
     case 'symbol':
     case 'search':
       return symbolLines(data);
@@ -317,6 +371,48 @@ export function renderMarkdown(input: RenderInput): string {
         '## Symbols',
         '',
         markdownTable(['Location', 'Kind', 'SymbolId', 'Name', 'Identity'], rows),
+        '',
+      );
+    }
+  } else if (command === 'deps') {
+    const rows = rowsOf(data).map((item) => [
+      str(item.kind, 'dependency'),
+      `${str(item.sourceFile)}:${field(item.line)}:${field(item.col)}`,
+      str(item.depType),
+      str(item.targetFile) || str(item.specifier, '-'),
+      str(item.relationClass),
+      str(item.confidence),
+      str(item.unresolvedReason, '-'),
+    ]);
+    if (rows.length > 0) {
+      lines.push(
+        '## Relations',
+        '',
+        markdownTable(
+          ['Kind', 'Source', 'Type', 'Target', 'Relation', 'Confidence', 'Reason'],
+          rows,
+        ),
+        '',
+      );
+    }
+    const blindSpots = Array.isArray(data.blindSpots) ? data.blindSpots : [];
+    if (blindSpots.length > 0) {
+      lines.push(
+        '## Blind spots',
+        '',
+        markdownTable(
+          ['Category', 'Reason', 'Files', 'Symbols', 'Hint'],
+          blindSpots.map((entry) => {
+            const spot = asRecord(entry) ?? {};
+            return [
+              str(spot.category),
+              str(spot.missReason),
+              field(spot.affectedFiles),
+              field(spot.potentiallyAffectedSymbols),
+              str(spot.manualCheckHint),
+            ];
+          }),
+        ),
         '',
       );
     }
@@ -418,6 +514,8 @@ function conclusion(command: string, data: Row): string {
       return `Index state: ${str(data.state, 'uninitialized')} (${str(data.staleness, 'uninitialized')})`;
     case 'references':
       return `References: ${field(asRecord(data.counts)?.total ?? 0)} matches, staleness ${str(data.staleness, 'fresh')}`;
+    case 'deps':
+      return `Dependencies (${str(data.type, 'file')}): ${field(asRecord(data.counts)?.total ?? 0)} relations, ${field(asRecord(data.counts)?.certain ?? 0)} certain, ${field(asRecord(data.counts)?.heuristic ?? 0)} heuristic, ${field(asRecord(data.counts)?.dynamicUnresolved ?? 0)} unresolved`;
     case 'symbol':
       return `Symbol: ${str(rowsOf(data)[0]?.nameChain)}`;
     case 'search':
@@ -466,6 +564,12 @@ export function renderPretty(input: RenderInput, options: RenderOptions): string
     lines.push('');
     lines.push(colorize('Evidence', 'dim'));
     for (const item of rowsOf(data)) {
+      if (command === 'deps') {
+        lines.push(
+          `  ${str(item.sourceFile)}:${field(item.line)}:${field(item.col)} ${str(item.depType)} ${field(item.evidence)}`,
+        );
+        continue;
+      }
       if (typeof item.identityEvidence === 'object' && item.identityEvidence !== null) {
         lines.push(`  ${str(item.nameChain, str(item.symbolId))}: ${field(item.identityEvidence)}`);
       }

@@ -88,6 +88,100 @@ export interface ReferenceRecord {
   buildId: string;
 }
 
+/**
+ * Seven mandatory relation fields (docs/08-relations.md 8.1.3). Values are
+ * persisted as one JSON column so every edge can answer "why".
+ */
+export interface RelationEvidence {
+  sourceOfTruth: string;
+  analysisVersion: string;
+  constraints: string[];
+  missReason: string | null;
+}
+
+export type DependencyType =
+  | 'import'
+  | 'import-type'
+  | 'export'
+  | 'require'
+  | 'dynamic-import'
+  | 'cross-package'
+  | 'style-import'
+  | 'style-use'
+  | 'style-forward'
+  | 'style-src'
+  | 'style-link';
+
+export interface DependencyRecord {
+  sourceFile: string;
+  targetFile: string | null;
+  sourceRootId: string;
+  targetRootId: string | null;
+  isCrossRoot: boolean;
+  sourceModule?: string | null;
+  targetModule?: string | null;
+  depType: DependencyType;
+  specifier: string;
+  relationClass: RelationClass;
+  confidence: Confidence;
+  analysisEngine: string;
+  line: number;
+  col: number;
+  unresolvedReason: string | null;
+  evidence: RelationEvidence;
+}
+
+export interface CallRecord {
+  callerSymbolId: string | null;
+  calleeSymbolId: string | null;
+  callerFile: string;
+  calleeFile: string | null;
+  line: number;
+  col: number;
+  resolution: Confidence;
+  relationClass: RelationClass;
+  confidence: Confidence;
+  analysisEngine: string;
+  unresolvedReason: string | null;
+  evidence: RelationEvidence;
+}
+
+export interface ArchitectureModuleRecord {
+  name: string;
+  include: string[];
+  allow: string[] | null;
+  fileCount: number;
+  symbolCount: number;
+}
+
+export interface ArchitectureViolationRecord {
+  ruleId: string;
+  fromModule: string;
+  toModule: string;
+  sourceFile: string;
+  targetFile: string;
+  line: number;
+  col: number;
+  depType: DependencyType;
+  relationClass: RelationClass;
+  confidence: Confidence;
+  analysisEngine: string;
+  evidence: RelationEvidence;
+}
+
+export type BlindSpotCategory = 'code' | 'style' | 'multi-root' | 'coverage';
+
+export interface BlindSpot {
+  category: BlindSpotCategory;
+  missReason: string;
+  affectedFiles: number;
+  potentiallyAffectedSymbols: number | null;
+  estimateMethod: string | null;
+  manualCheckHint: string;
+  sample: string[];
+  sourceQuery: string;
+}
+
 export interface Coverage {
   filesCovered: number;
   filesSkipped: number;
@@ -98,6 +192,14 @@ export interface Coverage {
   unmapped: number;
   /** Volar-internal symbols/edges dropped by docs/04-architecture.md 4.1.2. */
   filteredInternal: number;
+  styleFiles?: number;
+  styleEdges?: number;
+  styleResolved?: number;
+  styleUnresolved?: number;
+  dependencies?: number;
+  calls?: number;
+  crossRootEdges?: number;
+  architectureViolations?: number;
 }
 
 export interface ComponentProp {

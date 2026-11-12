@@ -16,6 +16,7 @@ export interface EffectiveRootConfig {
   budgets: BudgetsConfig;
   output: OutputConfig;
   style: NexusConfig['style'];
+  architecture: NexusConfig['architecture'];
   surface: SurfaceConfig;
   vue: NexusConfig['vue'];
   commands: NexusConfig['commands'];
@@ -101,6 +102,7 @@ export function resolveRootConfig(
     budgets,
     output,
     style: config.style,
+    architecture: config.architecture,
     surface,
     vue: config.vue,
     commands: config.commands,
@@ -111,6 +113,7 @@ export function resolveRootConfig(
     budgets,
     output,
     style: config.style,
+    architecture: config.architecture,
     surface,
     vue: config.vue,
     commands: config.commands,

@@ -66,6 +66,12 @@ import { writeShadowProject, type ShadowProject } from '../vue/shadow.js';
 import { buildSurface } from '../surface/builder.js';
 import { writeSurface } from '../surface/store.js';
 import type { SurfaceRootSnapshot } from '../surface/types.js';
+import { buildGraph, type GraphBuildResult } from '../graph/builder.js';
+import {
+  CrossRootResolver,
+  loadWorkspaceRootInfo,
+  type WorkspaceRootInfo,
+} from '../graph/cross-root.js';
 
 export interface BuildProgressEvent {
   type:
@@ -89,6 +95,8 @@ export interface RootBuildResult {
   files: number;
   symbols: number;
   references: number;
+  dependencies?: number;
+  calls?: number;
   durationMs: number;
   errorCode: string | null;
   errorMessage: string | null;
@@ -108,6 +116,8 @@ export interface BuildOptions {
   loadedConfig: LoadedConfig;
   onProgress?: (event: BuildProgressEvent) => void;
   serial?: boolean;
+  /** All selected roots; used only for declared-package boundary resolution. */
+  workspaceRoots?: readonly WorkspaceRootInfo[];
 }
 
 interface RootAnalysis {
@@ -121,9 +131,17 @@ interface RootAnalysis {
   components: ComponentRecord[];
   vueFileMeta: VueFileMetaRecord[];
   surface: SurfaceRootSnapshot;
+  graph: GraphBuildResult;
   vue: VueAnalysisSummary;
   degraded: string[];
-  timings: { scanMs: number; analyzeMs: number; vueMs: number; scipMs: number; mapMs: number };
+  timings: {
+    scanMs: number;
+    analyzeMs: number;
+    vueMs: number;
+    scipMs: number;
+    mapMs: number;
+    graphMs: number;
+  };
 }
 
 function emit(options: BuildOptions, event: BuildProgressEvent): void {
@@ -506,6 +524,18 @@ async function analyzeRoot(
     ? tsconfig.fileNames.filter((fileName) => scannedNames.has(path.resolve(fileName)))
     : tsFiles.map((file) => file.absolutePath);
   const program = createSyntaxProgram(fileNames, tsconfig.options);
+  const semanticProgram = tsconfig.ok
+    ? ts.createProgram({
+        rootNames: [...fileNames],
+        options: {
+          ...(tsconfig.options as ts.CompilerOptions),
+          noEmit: true,
+          skipLibCheck: true,
+          types: [],
+        },
+      })
+    : program;
+  const checker = semanticProgram.getTypeChecker();
   const tsDeclarations = collectDeclarations(program, rootAbs, options.projectRoot, root.rootId);
 
   const projections: VueProjection[] = [];
@@ -668,6 +698,43 @@ async function analyzeRoot(
   }
   const mapping = mergeMappings(tsMapping, vueMapping, collisions);
   const mapMs = Date.now() - mapStarted;
+  const graphStarted = Date.now();
+  const callerInfo =
+    options.workspaceRoots?.find((entry) => entry.rootId === root.rootId) ??
+    loadWorkspaceRootInfo({
+      projectRoot: options.projectRoot,
+      rootId: root.rootId,
+      rootPath: root.rootPath,
+      packageName: root.packageName,
+    });
+  const graph = buildGraph({
+    projectRoot: options.projectRoot,
+    rootAbs,
+    rootId: root.rootId,
+    rootPath: root.rootPath,
+    files: scan.files,
+    program: semanticProgram,
+    checker,
+    assignments,
+    crossRoot: new CrossRootResolver({
+      projectRoot: options.projectRoot,
+      caller: callerInfo,
+      roots: options.workspaceRoots ?? [],
+    }),
+    architecture: effective.architecture,
+    style: {
+      aliases: effective.style.aliases,
+      extensions: effective.style.extensions,
+    },
+    coverage: {
+      filesIgnored: scan.filesIgnored,
+      filesSkippedBySize: scan.filesSkippedBySize,
+      filesFailed: scan.filesFailed.map((entry) => entry.path),
+      unmappedSymbols: mapping.stats.unmapped,
+    },
+  });
+  const graphMs = Date.now() - graphStarted;
+  if (graph.warnings.length > 0) degraded.push('architecture-warnings');
 
   const vue = buildVueSummary({
     vueFiles: vueFiles.length,
@@ -740,6 +807,7 @@ async function analyzeRoot(
       symbols: mapping.symbols,
       components,
       config: effective.surface,
+      moduleByPath: graph.moduleByPath,
     });
     if (surface.warnings.length > 0) {
       degraded.push('surface-warnings');
@@ -750,8 +818,6 @@ async function analyzeRoot(
       `surface build failed: ${error instanceof Error ? error.message : String(error)}`,
     ]);
   }
-  const analyzeMs = Date.now() - analyzeStarted;
-
   return {
     scan,
     tsconfigOk: tsconfig.ok,
@@ -763,9 +829,17 @@ async function analyzeRoot(
     components,
     vueFileMeta,
     surface,
+    graph,
     vue,
     degraded: [...new Set(degraded)].sort(),
-    timings: { scanMs, analyzeMs, vueMs: Math.max(vueMs, 0), scipMs, mapMs },
+    timings: {
+      scanMs,
+      analyzeMs: Date.now() - analyzeStarted,
+      vueMs: Math.max(vueMs, 0),
+      scipMs,
+      mapMs,
+      graphMs,
+    },
   };
 }
 
@@ -777,6 +851,8 @@ interface BuildRootOutcome {
   files: number;
   symbols: number;
   references: number;
+  dependencies: number;
+  calls: number;
   coverage: RootManifest['coverage'];
   vue: VueAnalysisSummary;
   degraded: string[];
@@ -804,6 +880,14 @@ function coverageOf(analysis: RootAnalysis): RootManifest['coverage'] {
     filesSkippedBySize: analysis.scan.filesSkippedBySize,
     filesOutsideRoot: analysis.scan.outsideRoot.length,
     hashCollisions: analysis.collisions,
+    styleFiles: analysis.graph.stats.style.files,
+    styleEdges: analysis.graph.stats.style.edges,
+    styleResolved: analysis.graph.stats.style.resolved,
+    styleUnresolved: analysis.graph.stats.style.unresolved,
+    dependencies: analysis.graph.dependencies.length,
+    calls: analysis.graph.calls.length,
+    crossRootEdges: analysis.graph.stats.crossRootEdges,
+    architectureViolations: analysis.graph.architectureViolations.length,
   };
 }
 
@@ -868,6 +952,10 @@ async function buildRoot(input: {
       files: analysis.scan.files,
       symbols: drain(analysis.mapping.symbols),
       references: withBuildId(drain(analysis.mapping.references), buildId),
+      dependencies: analysis.graph.dependencies,
+      calls: analysis.graph.calls,
+      architectureModules: analysis.graph.architectureModules,
+      architectureViolations: analysis.graph.architectureViolations,
       mappingRows: mappingRows({
         assignments: analysis.assignments,
         vueDeclarationSet: analysis.vueDeclarationSet,
@@ -887,6 +975,16 @@ async function buildRoot(input: {
     const builtAt = new Date().toISOString();
     const sizes = dbSizes(databasePath(projectRoot, root.rootId));
     const peakRssMB = sampler.stop();
+    const byType: Record<string, number> = {};
+    const byConfidence: Record<string, number> = {};
+    for (const dependency of analysis.graph.dependencies) {
+      byType[dependency.depType] = (byType[dependency.depType] ?? 0) + 1;
+      byConfidence[dependency.confidence] = (byConfidence[dependency.confidence] ?? 0) + 1;
+    }
+    for (const call of analysis.graph.calls) {
+      byType.call = (byType.call ?? 0) + 1;
+      byConfidence[call.confidence] = (byConfidence[call.confidence] ?? 0) + 1;
+    }
     const manifest: RootManifest = {
       schemaVersion: SCHEMA_VERSION,
       indexVersion: 2,
@@ -911,8 +1009,20 @@ async function buildRoot(input: {
         symbols: committed.counts.symbols,
         references: committed.counts.references,
         unresolvedReferences: coverage.unresolved,
+        dependencies: committed.counts.dependencies,
+        calls: committed.counts.calls,
       },
       coverage,
+      graph: {
+        dependencies: analysis.graph.dependencies.length,
+        calls: analysis.graph.calls.length,
+        styleEdges: analysis.graph.stats.style.edges,
+        crossRootEdges: analysis.graph.stats.crossRootEdges,
+        architectureViolations: analysis.graph.architectureViolations.length,
+        byConfidence,
+        byType,
+      },
+      blindSpots: analysis.graph.blindSpots,
       vue: analysis.vue,
       stats: {
         exact: analysis.mapping.stats.exact,
@@ -930,6 +1040,7 @@ async function buildRoot(input: {
         vueMs: analysis.timings.vueMs,
         scipMs: analysis.timings.scipMs,
         mapMs: analysis.timings.mapMs,
+        graphMs: analysis.timings.graphMs,
         writeMs,
         writeBatches: committed.writeBatches,
         totalMs: Date.now() - totalStarted,
@@ -973,6 +1084,8 @@ async function buildRoot(input: {
       files: committed.counts.files,
       symbols: committed.counts.symbols,
       references: committed.counts.references,
+      dependencies: committed.counts.dependencies,
+      calls: committed.counts.calls,
       coverage,
       vue: analysis.vue,
       degraded,
@@ -1119,6 +1232,16 @@ export async function buildWorkspace(options: BuildOptions): Promise<BuildResult
     });
   }
 
+  const workspaceRoots: WorkspaceRootInfo[] = discovery.roots.map((root) =>
+    loadWorkspaceRootInfo({
+      projectRoot,
+      rootId: root.rootId,
+      rootPath: root.rootPath,
+      packageName: root.packageName,
+    }),
+  );
+  const buildOptions: BuildOptions = { ...options, workspaceRoots };
+
   clearTmp(projectRoot);
   const startedAt = new Date().toISOString();
   const startedMs = Date.now();
@@ -1135,7 +1258,7 @@ export async function buildWorkspace(options: BuildOptions): Promise<BuildResult
         buildRoot({
           root,
           effective,
-          options,
+          options: buildOptions,
           sqliteVersion: sqliteProbe.version,
           rootSetHash,
           startedAt,

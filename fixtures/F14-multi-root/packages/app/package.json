@@ -1,0 +1,10 @@
+{
+  "name": "@f14/app",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@f14/ui": "1.0.0",
+    "@f14/ghost": "1.0.0"
+  }
+}

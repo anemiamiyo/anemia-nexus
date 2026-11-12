@@ -42,7 +42,7 @@ export interface SurfaceEntry {
   derived: boolean;
   stability: SurfaceStability;
   since: string;
-  ownerModule: null;
+  ownerModule: string | null;
   docLink: string | null;
   symbolId: string;
   identityConfidence: string;

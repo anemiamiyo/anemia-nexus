@@ -4,6 +4,7 @@ import type {
   ComponentRecord,
   Counts,
   Coverage,
+  DependencyRecord,
   QueryEnvelope,
   ReferenceRecord,
   StalenessState,
@@ -16,10 +17,15 @@ import { databasePath, manifestPath, readManifest } from '../store/manifest.js';
 import {
   findSymbolsByName,
   openReadStore,
+  readArchitectureModules,
+  readArchitectureViolations,
+  readCalls,
   readComponent,
+  readDependencies,
   readReferencesTo,
   readSymbolById,
   searchSymbols,
+  fileCovered,
   type ReadStore,
 } from '../store/read.js';
 import { readHistory } from '../store/history.js';
@@ -618,4 +624,322 @@ export function manifestFor(projectRoot: string, rootId: string): ReturnType<typ
 
 export function absoluteRootPath(projectRoot: string, rootPath: string): string {
   return path.resolve(projectRoot, rootPath);
+}
+
+export type DependencyQueryType = 'file' | 'module' | 'style' | 'call';
+
+export interface DependencyItem {
+  kind: 'dependency' | 'call' | 'module-edge' | 'violation';
+  rootId: string;
+  sourceFile: string;
+  targetFile: string | null;
+  sourceModule: string | null;
+  targetModule: string | null;
+  depType: string;
+  specifier: string | null;
+  line: number;
+  col: number;
+  relationClass: string;
+  confidence: string;
+  analysisEngine: string;
+  unresolvedReason: string | null;
+  isCrossRoot?: boolean;
+  evidence: unknown;
+  callerSymbolId?: string | null;
+  calleeSymbolId?: string | null;
+  callerName?: string | null;
+  calleeName?: string | null;
+  edgeCount?: number;
+  edgeCounts?: { certain: number; heuristic: number; dynamicUnresolved: number };
+  ruleId?: string;
+}
+
+export interface DependencyQueryResult {
+  envelope: QueryEnvelope<DependencyItem>;
+  type: DependencyQueryType;
+  target: string;
+  reverse: boolean;
+  data: {
+    modules: Array<{
+      name: string;
+      allow: string[] | null;
+      fileCount: number;
+      symbolCount: number;
+    }>;
+    violations: unknown[];
+    blindSpots: unknown[];
+    crossRootEdges: unknown[];
+  };
+}
+
+function normalizeTargetPath(projectRoot: string, target: string): string {
+  const absolute = path.resolve(projectRoot, target);
+  const relative = path.relative(projectRoot, absolute);
+  if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
+    return relative.replace(/\\/g, '/');
+  }
+  return target.replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
+function dependencyItem(rootId: string, dependency: DependencyRecord): DependencyItem {
+  return {
+    kind: 'dependency',
+    rootId,
+    sourceFile: dependency.sourceFile,
+    targetFile: dependency.targetFile,
+    sourceModule: dependency.sourceModule ?? null,
+    targetModule: dependency.targetModule ?? null,
+    depType: dependency.depType,
+    specifier: dependency.specifier,
+    line: dependency.line,
+    col: dependency.col,
+    relationClass: dependency.relationClass,
+    confidence: dependency.confidence,
+    analysisEngine: dependency.analysisEngine,
+    unresolvedReason: dependency.unresolvedReason,
+    isCrossRoot: dependency.isCrossRoot,
+    evidence: dependency.evidence,
+  };
+}
+
+export async function queryDependencies(
+  options: QueryOptions,
+  target: string,
+  type: DependencyQueryType,
+  reverse: boolean,
+): Promise<DependencyQueryResult> {
+  if (!['file', 'module', 'style', 'call'].includes(type)) {
+    throw nexusError('E00', 'invalid deps type', {
+      reason: `expected file, module, style or call, received ${JSON.stringify(type)}`,
+      suggestion: 'Use --type file|module|style|call.',
+    });
+  }
+  if (target.trim() === '') {
+    throw nexusError('E00', 'deps requires a target', {
+      reason: 'no file, module, style file or symbol was provided',
+      suggestion: 'Run `nex deps <file>` or `nex deps --type module <name>`.',
+    });
+  }
+  const context = await prepareContext(options);
+  const roots = selectRoots(context, options);
+  if (roots.length !== 1) {
+    throw nexusError('E24', 'multi-root deps queries are not provided in Phase 04', {
+      reason:
+        'dependency graphs are per root; cross-root edges are returned with their source root',
+      suggestion: 'Pass --root <rootId>.',
+    });
+  }
+  const root = roots[0] as RootStatus;
+  const store = openReadStore(databasePath(options.projectRoot, root.rootId));
+  if (store === null) {
+    throw nexusError('E01', 'index does not exist', {
+      reason: 'no committed build in index.db',
+      suggestion: 'Run `nex build`.',
+    });
+  }
+  try {
+    const notes: string[] = [];
+    const modules = readArchitectureModules(store).map((module) => ({
+      name: module.name,
+      allow: module.allow,
+      fileCount: module.fileCount,
+      symbolCount: module.symbolCount,
+    }));
+    const violations = readArchitectureViolations(store);
+    const manifest = manifestFor(options.projectRoot, root.rootId).manifest;
+    const blindSpots = Array.isArray(manifest?.blindSpots) ? manifest.blindSpots : [];
+    const items: DependencyItem[] = [];
+
+    if (type === 'call') {
+      const symbol = resolveSymbol(store, target);
+      const calls = readCalls(
+        store,
+        reverse ? { calleeSymbolId: symbol.symbolId } : { callerSymbolId: symbol.symbolId },
+      );
+      for (const call of calls) {
+        const callerName =
+          call.callerSymbolId === null
+            ? null
+            : (readSymbolById(store, call.callerSymbolId)?.nameChain ?? null);
+        const calleeName =
+          call.calleeSymbolId === null
+            ? null
+            : (readSymbolById(store, call.calleeSymbolId)?.nameChain ?? null);
+        items.push({
+          kind: 'call',
+          rootId: root.rootId,
+          sourceFile: call.callerFile,
+          targetFile: call.calleeFile,
+          sourceModule: null,
+          targetModule: null,
+          depType: 'call',
+          specifier: null,
+          line: call.line,
+          col: call.col,
+          relationClass: call.relationClass,
+          confidence: call.confidence,
+          analysisEngine: call.analysisEngine,
+          unresolvedReason: call.unresolvedReason,
+          evidence: call.evidence,
+          callerSymbolId: call.callerSymbolId,
+          calleeSymbolId: call.calleeSymbolId,
+          callerName,
+          calleeName,
+        });
+      }
+      notes.push('call edges are static TS/TSX calls; Vue script calls are not claimed');
+    } else if (type === 'module') {
+      if (modules.length === 0) {
+        throw nexusError('E00', 'architecture modules are not configured', {
+          reason: 'deps --type module needs explicit architecture.modules[].include patterns',
+          suggestion: 'Add architecture.modules to .nexus/nexus.config.json and rebuild.',
+        });
+      }
+      if (!modules.some((module) => module.name === target)) {
+        throw nexusError('E05', 'architecture module does not exist', {
+          reason: `no module named ${target}`,
+          suggestion: 'Use one of the configured module names.',
+          evidence: { modules: modules.map((module) => module.name) },
+        });
+      }
+      const all = readDependencies(store, { limit: 20000 });
+      const byEdge = new Map<string, DependencyItem>();
+      for (const dependency of all) {
+        if (dependency.sourceModule == null || dependency.targetModule == null) continue;
+        if (reverse ? dependency.targetModule !== target : dependency.sourceModule !== target)
+          continue;
+        const key = `${dependency.sourceModule}\\u0000${dependency.targetModule}\\u0000${dependency.depType}`;
+        const existing = byEdge.get(key);
+        if (existing === undefined) {
+          byEdge.set(key, {
+            ...dependencyItem(root.rootId, dependency),
+            kind: 'module-edge',
+            sourceFile: dependency.sourceModule,
+            targetFile: dependency.targetModule,
+            edgeCount: 1,
+            edgeCounts: {
+              certain: dependency.relationClass === 'certain' ? 1 : 0,
+              heuristic: dependency.relationClass === 'heuristic' ? 1 : 0,
+              dynamicUnresolved: dependency.relationClass === 'dynamic-unresolved' ? 1 : 0,
+            },
+          });
+        } else {
+          existing.edgeCount = (existing.edgeCount ?? 0) + 1;
+          const counts = existing.edgeCounts as DependencyItem['edgeCounts'];
+          if (counts !== undefined) {
+            if (dependency.relationClass === 'certain') counts.certain += 1;
+            else if (dependency.relationClass === 'heuristic') counts.heuristic += 1;
+            else counts.dynamicUnresolved += 1;
+          }
+        }
+      }
+      items.push(...byEdge.values());
+      for (const violation of violations) {
+        if (reverse ? violation.toModule !== target : violation.fromModule !== target) continue;
+        items.push({
+          kind: 'violation',
+          rootId: root.rootId,
+          sourceFile: violation.sourceFile,
+          targetFile: violation.targetFile,
+          sourceModule: violation.fromModule,
+          targetModule: violation.toModule,
+          depType: violation.depType,
+          specifier: null,
+          line: violation.line,
+          col: violation.col,
+          relationClass: violation.relationClass,
+          confidence: violation.confidence,
+          analysisEngine: violation.analysisEngine,
+          unresolvedReason: null,
+          evidence: violation.evidence,
+          ruleId: violation.ruleId,
+        });
+      }
+      notes.push('module edges aggregate file-level dependencies; counts are edge counts');
+    } else {
+      const normalized = normalizeTargetPath(options.projectRoot, target);
+      const all = readDependencies(store, { limit: 20000 });
+      const styleOnly = type === 'style';
+      for (const dependency of all) {
+        if (styleOnly && !dependency.depType.startsWith('style-')) continue;
+        const sourceMatches =
+          dependency.sourceFile === normalized ||
+          dependency.sourceFile.startsWith(`${normalized}/`);
+        const targetMatches =
+          dependency.targetFile === normalized ||
+          (dependency.targetFile ?? '').startsWith(`${normalized}/`);
+        if (reverse ? !targetMatches : !sourceMatches) continue;
+        items.push(dependencyItem(root.rootId, dependency));
+      }
+      if (items.some((item) => item.isCrossRoot === true)) {
+        notes.push(
+          'crossRootEdges are listed with the source root; the target root is not expanded',
+        );
+      }
+      if (items.length === 0) {
+        if (styleOnly) {
+          notes.push(
+            `no style dependency matched ${normalized}; check alias-unresolved, ignored and not-covered`,
+          );
+        } else if (!fileCovered(store, normalized)) {
+          notes.push(`not-covered: ${normalized} is not in this index`);
+        } else {
+          notes.push(`not-found: no dependency edge matched ${normalized}`);
+        }
+      }
+    }
+
+    items.sort((left, right) => {
+      if (left.sourceFile !== right.sourceFile) return left.sourceFile < right.sourceFile ? -1 : 1;
+      if (left.line !== right.line) return left.line - right.line;
+      if (left.col !== right.col) return left.col - right.col;
+      return left.depType < right.depType ? -1 : 1;
+    });
+    const result = envelope({
+      command: 'deps',
+      roots,
+      items,
+      coverage: aggregateCoverage(roots),
+      staleness: worstStaleness(roots),
+      buildFingerprint: root.buildFingerprint,
+      warnings: context.warnings,
+      budget: context.budget,
+      notes,
+      mode: root.degraded.includes('syntax-only') ? 'syntax-only' : 'normal',
+    });
+    if (type === 'module') {
+      for (const item of items) {
+        result.counts.certain +=
+          item.edgeCounts?.certain ?? (item.relationClass === 'certain' ? 1 : 0);
+        result.counts.heuristic +=
+          item.edgeCounts?.heuristic ?? (item.relationClass === 'heuristic' ? 1 : 0);
+        result.counts.dynamicUnresolved +=
+          item.edgeCounts?.dynamicUnresolved ??
+          (item.relationClass === 'dynamic-unresolved' ? 1 : 0);
+      }
+    } else {
+      result.counts.certain = items.filter((item) => item.relationClass === 'certain').length;
+      result.counts.heuristic = items.filter((item) => item.relationClass === 'heuristic').length;
+      result.counts.dynamicUnresolved = items.filter(
+        (item) => item.relationClass === 'dynamic-unresolved',
+      ).length;
+    }
+    const crossRootEdges = items.filter(
+      (item) => item.kind === 'dependency' && item.isCrossRoot === true,
+    );
+    return {
+      envelope: result,
+      type,
+      target,
+      reverse,
+      data: {
+        modules,
+        violations,
+        blindSpots,
+        crossRootEdges,
+      },
+    };
+  } finally {
+    store.db.close();
+  }
 }

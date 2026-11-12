@@ -1,0 +1,5 @@
+@use "@styles/base.css";
+@use "./#{name}.scss";
+@import "./missing.css";
+@import "sass:math";
+@import "~external-pkg/theme";

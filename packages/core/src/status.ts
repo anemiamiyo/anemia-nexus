@@ -14,12 +14,15 @@ import { readManifest, rootDirectory, type RootManifest } from './store/manifest
 import { latestCommittedBuild, openDatabase } from './store/db.js';
 
 export const CAPABILITIES = {
-  styleDependency: 'none',
+  styleDependency: 'file-level',
   styleSelector: 'none',
   htmlFileRef: 'experimental-off',
   vue: 'sfc-semantic',
   templateReferences: ['component-use', 'template-binding', 'interpolation'],
   apiSurface: 'evidence-sources',
+  dependencyGraph: 'file-level',
+  callGraph: 'static-ts',
+  architectureRules: 'allow-list',
   incremental: false,
   mcpFormats: [] as string[],
   dynamicUnresolved: 'marked',
@@ -48,6 +51,12 @@ export interface RootStatus {
   files: number;
   symbols: number;
   references: number;
+  dependencies: number;
+  calls: number;
+  styleEdges: number;
+  crossRootEdges: number;
+  architectureViolations: number;
+  blindSpotCount: number;
   buildFingerprint: string | null;
   buildFingerprintPrefix: string | null;
   surfaceHash: string | null;
@@ -287,6 +296,12 @@ export async function statusReport(options: StatusOptions): Promise<StatusReport
         files: 0,
         symbols: 0,
         references: 0,
+        dependencies: 0,
+        calls: 0,
+        styleEdges: 0,
+        crossRootEdges: 0,
+        architectureViolations: 0,
+        blindSpotCount: 0,
         buildFingerprint: null,
         buildFingerprintPrefix: null,
         surfaceHash: null,
@@ -362,6 +377,12 @@ export async function statusReport(options: StatusOptions): Promise<StatusReport
       files: manifest.counts?.files ?? 0,
       symbols: manifest.counts?.symbols ?? 0,
       references: manifest.counts?.references ?? 0,
+      dependencies: manifest.graph?.dependencies ?? manifest.counts?.dependencies ?? 0,
+      calls: manifest.graph?.calls ?? manifest.counts?.calls ?? 0,
+      styleEdges: manifest.graph?.styleEdges ?? 0,
+      crossRootEdges: manifest.graph?.crossRootEdges ?? 0,
+      architectureViolations: manifest.graph?.architectureViolations ?? 0,
+      blindSpotCount: Array.isArray(manifest.blindSpots) ? manifest.blindSpots.length : 0,
       buildFingerprint: manifest.buildFingerprint || null,
       buildFingerprintPrefix:
         manifest.buildFingerprint === '' ? null : manifest.buildFingerprint.slice(0, 12),
@@ -396,6 +417,16 @@ export async function statusReport(options: StatusOptions): Promise<StatusReport
     coverage.unresolved += root.coverage.unresolved;
     coverage.unmapped += root.coverage.unmapped;
     coverage.filteredInternal += root.coverage.filteredInternal ?? 0;
+    coverage.styleFiles = (coverage.styleFiles ?? 0) + (root.coverage.styleFiles ?? 0);
+    coverage.styleEdges = (coverage.styleEdges ?? 0) + (root.coverage.styleEdges ?? 0);
+    coverage.styleResolved = (coverage.styleResolved ?? 0) + (root.coverage.styleResolved ?? 0);
+    coverage.styleUnresolved =
+      (coverage.styleUnresolved ?? 0) + (root.coverage.styleUnresolved ?? 0);
+    coverage.dependencies = (coverage.dependencies ?? 0) + (root.coverage.dependencies ?? 0);
+    coverage.calls = (coverage.calls ?? 0) + (root.coverage.calls ?? 0);
+    coverage.crossRootEdges = (coverage.crossRootEdges ?? 0) + (root.coverage.crossRootEdges ?? 0);
+    coverage.architectureViolations =
+      (coverage.architectureViolations ?? 0) + (root.coverage.architectureViolations ?? 0);
   }
 
   const activeRoot = findActiveRoot(

@@ -1,0 +1,10 @@
+{
+  "dependency": ["dynamic-import"],
+  "calls": {
+    "direct": 1,
+    "heuristic": 1,
+    "unresolved": 2
+  },
+  "unresolvedReasons": ["dynamic-callee", "eval"],
+  "note": "the dynamic import is a dependency, not a call edge"
+}

@@ -1,0 +1,34 @@
+{
+  "style-import": [
+    { "source": "src/main.ts", "target": "src/styles/theme.css", "engine": "script-side" },
+    { "source": "src/styles/theme.css", "target": "src/styles/base.css", "engine": "style-lexer" },
+    { "source": "src/styles/app.scss", "target": "src/styles/legacy.less", "engine": "style-lexer" },
+    { "source": "src/styles/legacy.less", "target": "src/styles/theme.css", "engine": "style-lexer" }
+  ],
+  "style-use": [
+    {
+      "source": "src/styles/app.scss",
+      "target": "src/styles/_variables.scss",
+      "relationClass": "certain"
+    },
+    {
+      "source": "src/styles/edge-cases.scss",
+      "target": "src/styles/base.css",
+      "relationClass": "heuristic"
+    }
+  ],
+  "style-forward": [
+    {
+      "source": "src/styles/app.scss",
+      "target": "src/styles/_mixins.scss",
+      "relationClass": "certain"
+    }
+  ],
+  "style-src": [{ "source": "src/App.vue", "target": "src/styles/app.scss" }],
+  "unresolved": [
+    { "source": "src/styles/edge-cases.scss", "reason": "dynamic-path" },
+    { "source": "src/styles/edge-cases.scss", "reason": "not-found" },
+    { "source": "src/styles/edge-cases.scss", "reason": "sass-builtin" },
+    { "source": "src/styles/edge-cases.scss", "reason": "external-package" }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@f14/ui",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts"
+    },
+    "./button": {
+      "import": "./src/button.ts"
+    }
+  }
+}

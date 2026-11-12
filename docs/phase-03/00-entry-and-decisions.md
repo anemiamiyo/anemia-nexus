@@ -202,3 +202,40 @@
 - 任何验收口径变更必须先更新本文件与 `02-plan-and-gates.md`，再改代码。
 - 实施结果只写入 `03-implementation-report.md`，不得把计划回填为已完成。
 - `docs/21-phase-00.md` 的“边算边写”要求在本阶段按 §4.7 执行，并在报告中单列证据与剩余限制。
+
+## 8. 负责人评审回执（2026-11-13）
+
+项目负责人在 2026-11-13 的评审答复中：
+
+1. **接受 Phase 03 以 `pass` 关闭**；`03-implementation-report.md` §10 的结论生效。
+2. **批准进入 Phase 04（关系图与架构分析）**；Phase 04 的入场、任务清单与冻结门槛见 `docs/phase-04/00-entry-and-decisions.md`、`01-task-checklist.md`、`02-plan-and-gates.md`。
+3. 将下列两个判断**授权本实施方统筹裁定**；裁定如下，并作为 Phase 03 关闭与 Phase 04 入场的共同依据。
+
+### 8.1 是否要求先补齐 §5 的任一项再评审
+
+**裁定：不要求，Phase 03 不以补齐 §5 任何一项作为关闭前提。** 三项分别处理：
+
+| §5 项 | 裁定 | 依据与后续 |
+|---|---|---|
+| 分析/写入完全重叠 | **不阻断关闭，留 Phase 06** | 19.1 阶段 03 的通过条件是 Surface 判定无反向误报、每条可解释、差分与人工一致；不含“分析/写入完全重叠”。该项是 19.1 阶段 06 与 21.2 的验收内容；Phase 03 的 G0 只承诺“写入阶段不扩大峰值”，已由 `BuildWriter`、单事务、迭代器与 ROLLBACK 测试证明。此时把 Phase 06 的门槛前移到 Phase 03，等同于单方面改动已冻结口径（20.6），不予采用。报告中以 `partial` 如实登记。 |
+| 真实项目 Surface 样本 | **不阻断关闭，转 Phase 04 证据债** | 17.1.2 明确真实项目只作本地可选观察，正确性断言仍以合成夹具 + tsserver/vue-tsc 为准；19.1 阶段 03 不要求真实项目样本。F07 + AST/人工 golden + 两次逐字节一致已满足阶段门槛。Phase 04 在改动 `surface.json`（`ownerModule`）时做一次**有界**真实项目抽样（若 `fixtures/local/` 有可用样本；否则用本仓库自索引），只作补充证据，不设为 Phase 03 重开条件；若抽样发现反向误报，作为 Phase 04 缺陷修复并补回归，不追溯改写 Phase 03 结论。 |
+| git ref 基线 | **无需补齐** | 已实现并由 `nex api-diff --base HEAD`（0 差异）与 F07 覆盖；限制仅为“项目根须在 git 内且基线已提交”，属可解释前置条件，已在报告 §5 第 8 条披露。 |
+
+同时确认：上述三项不因本次关闭而消失，统一登记在 `docs/phase-04/00-entry-and-decisions.md` §6 的跨阶段遗留台账，按“目标阶段 / 验收口径 / 不得冒充完成”跟踪。
+
+### 8.2 是否同意 `surface.json` 作为派生视图、不升 schema（§5.1）
+
+**裁定：同意。** 维持 `surface.json` 为按 root 的构建派生物、不新增 5.1 的 API 表、不升 SQLite schema。附加以下不可协商的护栏：
+
+1. **权威指针仍是 manifest**：`build` 在 DB 提交后、manifest 更新前原子写 `surface.json`；manifest 的 `buildId` / `buildFingerprint` 与文件不一致时，查询返回 `unknown` + warning，禁止静默使用陈旧 Surface。
+2. **单一写入协议**：`surface.json` 由构建写入；`api-snapshot` / `api-diff` 只读；`surface.json` 缺失或损坏时只能重建，不得由查询层补写。
+3. **Phase 04 只加派生字段**：`ownerModule` 由架构模块规则派生并写入 `surface.json`，`surfaceVersion` 保持 1；`ownerModule` **不进入** `surfaceHash` 的 API 语义输入（避免架构配置变化被误读为 API 变化），但写入文件供 `deps` 与人工复核。
+4. **触发重新评估的条件**（任一成立即由 Phase 06 决定是否落库/升级，不预设结论）：
+   - 需要跨构建或历史 Surface 查询（当前 `api-diff` 已用基线文件，不构成理由）；
+   - 增量构建需要在未重建 Surface 时保持 Surface 与 DB 同步；
+   - 多 root 查询需要在查询期合并 Surface；
+   - 文件大小/延迟成为已测量瓶颈，或 MCP/impact 需要结构化查询；
+   - 5.1 明确要求 API 作为 SQLite 实体参与外键/历史。
+5. **当前不升 schema 的理由成立**：Surface 体积小、需人读与 diff，5.6 把 `surface.json` 列为 JSON 视图；落库会引入新表/迁移与第二事实源，收益未证明。若未来落库，按 5.5 走不兼容变更与重建，不提供迁移脚本。
+
+以上裁定不修改 v1.24 规范正文；实施报告中不得把 `surface.json` 表述为“API 表”或“第二权威存储”。

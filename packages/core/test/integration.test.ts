@@ -56,7 +56,10 @@ describe('F01 build and queries', () => {
       });
       expect(status.state).toBe('ready');
       expect(status.staleness).toBe('fresh');
-      expect(status.capabilities.styleDependency).toBe('none');
+      expect(status.capabilities.styleDependency).toBe('file-level');
+      expect(status.capabilities.dependencyGraph).toBe('file-level');
+      expect(status.capabilities.callGraph).toBe('static-ts');
+      expect(status.capabilities.architectureRules).toBe('allow-list');
       expect(status.capabilities.mcpFormats).toEqual([]);
       expect(status.roots).toHaveLength(1);
 

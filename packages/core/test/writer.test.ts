@@ -4,7 +4,13 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { commitBuild, WRITE_BATCH_SIZE, type SymbolRecord } from 'anemia-core';
+import {
+  commitBuild,
+  WRITE_BATCH_SIZE,
+  type CallRecord,
+  type DependencyRecord,
+  type SymbolRecord,
+} from 'anemia-core';
 import { ANALYZER_VERSION } from '../src/index/analyzer.js';
 import { cleanup, makeEmptyProject } from './helpers.js';
 
@@ -64,7 +70,7 @@ function header(dbPath: string) {
     fields: {
       filesHash: 'files',
       configHash: 'config',
-      schemaVersion: 2,
+      schemaVersion: 3,
       analyzerVersion: ANALYZER_VERSION,
       rootSetHash: 'roots',
       nodeVersion: process.versions.node,
@@ -82,6 +88,52 @@ function file() {
     sourceHash: 'source',
     size: 10,
     language: 'ts' as const,
+  };
+}
+
+function dependency(): DependencyRecord {
+  return {
+    sourceFile: 'src/a.ts',
+    targetFile: 'src/b.ts',
+    sourceRootId: 'root',
+    targetRootId: 'root',
+    isCrossRoot: false,
+    depType: 'import',
+    specifier: './b',
+    relationClass: 'certain',
+    confidence: 'typed',
+    analysisEngine: 'ts-ast',
+    line: 1,
+    col: 0,
+    unresolvedReason: null,
+    evidence: {
+      sourceOfTruth: 'ts-ast',
+      analysisVersion: 'typescript',
+      constraints: [],
+      missReason: null,
+    },
+  };
+}
+
+function call(): CallRecord {
+  return {
+    callerSymbolId: null,
+    calleeSymbolId: null,
+    callerFile: 'src/a.ts',
+    calleeFile: null,
+    line: 1,
+    col: 0,
+    resolution: 'unresolved',
+    relationClass: 'dynamic-unresolved',
+    confidence: 'unresolved',
+    analysisEngine: 'ts-ast',
+    unresolvedReason: 'dynamic-callee',
+    evidence: {
+      sourceOfTruth: 'ts-ast',
+      analysisVersion: 'typescript',
+      constraints: [],
+      missReason: 'dynamic-callee',
+    },
   };
 }
 
@@ -104,6 +156,10 @@ describe('streaming SQLite writer', () => {
       files: [file()],
       symbols: symbols(),
       references: [],
+      dependencies: [],
+      calls: [],
+      architectureModules: [],
+      architectureViolations: [],
       mappingRows: [],
       components: [],
       vueFileMeta: [],
@@ -143,6 +199,10 @@ describe('streaming SQLite writer', () => {
         files: [file()],
         symbols: symbols(),
         references: [],
+        dependencies: [],
+        calls: [],
+        architectureModules: [],
+        architectureViolations: [],
         mappingRows: [],
         components: [],
         vueFileMeta: [],
@@ -161,5 +221,88 @@ describe('streaming SQLite writer', () => {
     } finally {
       db.close();
     }
+  });
+
+  it('rolls back dependency and call rows when a later generator fails', () => {
+    const directory = makeEmptyProject('writer-graph-rollback');
+    directories.push(directory);
+    const dbPath = path.join(directory, '.nexus', 'roots', 'root', 'index.db');
+    function* dependencies(): Generator<DependencyRecord> {
+      yield dependency();
+    }
+    function* calls(): Generator<CallRecord> {
+      yield call();
+      throw new Error('graph failure');
+    }
+
+    expect(() =>
+      commitBuild({
+        ...header(dbPath),
+        files: [file()],
+        symbols: [symbolAt(0)],
+        references: [],
+        dependencies: dependencies(),
+        calls: calls(),
+        architectureModules: [],
+        architectureViolations: [],
+        mappingRows: [],
+        components: [],
+        vueFileMeta: [],
+      }),
+    ).toThrow('graph failure');
+
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      const builds = db.prepare('select count(*) as count from build_record').get() as {
+        count: number;
+      };
+      const deps = db.prepare('select count(*) as count from dependencies').get() as {
+        count: number;
+      };
+      const callRows = db.prepare('select count(*) as count from calls').get() as {
+        count: number;
+      };
+      const files = db.prepare('select count(*) as count from files').get() as { count: number };
+      expect(builds.count).toBe(0);
+      expect(deps.count).toBe(0);
+      expect(callRows.count).toBe(0);
+      expect(files.count).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('refuses a v2 database with E06 instead of silently migrating', () => {
+    const directory = makeEmptyProject('writer-v2');
+    directories.push(directory);
+    const dbPath = path.join(directory, '.nexus', 'roots', 'root', 'index.db');
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    const legacy = new DatabaseSync(dbPath);
+    legacy.exec('create table meta (key text primary key, value text not null) strict');
+    legacy.prepare('insert into meta(key, value) values (?, ?)').run('schema_version', '2');
+    legacy.close();
+
+    let code = '';
+    try {
+      commitBuild({
+        ...header(dbPath),
+        files: [file()],
+        symbols: [symbolAt(0)],
+        references: [],
+        dependencies: [],
+        calls: [],
+        architectureModules: [],
+        architectureViolations: [],
+        mappingRows: [],
+        components: [],
+        vueFileMeta: [],
+      });
+    } catch (error) {
+      code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String(error.code)
+          : 'unknown';
+    }
+    expect(code).toBe('E06');
   });
 });
