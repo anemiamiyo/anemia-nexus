@@ -218,3 +218,15 @@
 - **PowerShell**：Node 由 **fnm 1.39.0** 管理，默认 **v24.22.2**（npm 11.19.1）。已用该二进制复验 `node -v`、构建产物 `packages/cli/dist/main.js --version`（`anemia-cli 0.0.0` / `node 24.22.2`）与 `tsc --noEmit`（退出 0）。
 - **CMD**：Node 由 **nvm-windows** 管理，**v22.16.0**（`D:\nodejs`），npm **10.9.2** 已可正常使用：`npm -v` → 10.9.2，`npm ls --depth=0` 与 `npm ci --dry-run` 均退出 0。
 - 因此，报告中的“npm 10.9.2 不可用 / 使用 npm 10.9.3 CLI”不再代表当前环境；`npm ci` 仍未做完整重装（避免破坏已验收的 `node_modules`），只完成了 dry-run。该偏差不影响 G1–G8 结论。
+
+## 12. 负责人验收裁定（2026-11-12）
+
+项目负责人书面确认：
+
+1. **接受 Phase 01 以 pass-with-limits 关闭**；§4 的 gate 结论与 §5 的已知限制构成关闭依据，不追认 DoD 全部完成。
+2. **批准进入 Phase 02（Vue 语义与引用查询）**。
+3. 对 §10 第 2 项“是否在本阶段补齐多 root 查询、`status --json-schema`、SCIP 峰值采集或 `npm ci` 基线后再评审”，授权由实施方判断：**前三项本阶段不补齐**（分别归属 Phase 05、Phase 03/07、Phase 06），`npm ci` 以 `npm ci --dry-run` 非破坏性验证作为基线证据。判断与理由见 `docs/phase-02/00-entry-and-decisions.md` §2。
+4. **允许 Phase 02 复用**本阶段的 SQLite schema、SCIP 适配层与输出契约；不得改变 v1.24 技术结论。Schema 的向后兼容扩展（新增 `vue_file_meta`、`components` 等）按 4.1.1/5.1 执行并升 `schemaVersion`，旧库重建。
+5. Phase 02 先产出需求/计划/完整任务清单文档，再按清单实施；实施结果写入 `docs/phase-02/03-implementation-report.md`。
+
+本裁定不修改 §1–§11 的实施记录与限制声明。

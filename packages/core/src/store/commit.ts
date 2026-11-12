@@ -2,7 +2,12 @@ import fs from 'node:fs';
 
 import { DatabaseSync } from 'node:sqlite';
 
-import type { ReferenceRecord, SymbolRecord } from '../model.js';
+import type {
+  ComponentRecord,
+  ReferenceRecord,
+  SymbolRecord,
+  VueFileMetaRecord,
+} from '../model.js';
 import type { ScannedFile } from '../discovery/scan.js';
 import type { BuildFingerprintFields } from '../index/fingerprint.js';
 import { nexusError } from '../errors.js';
@@ -19,7 +24,7 @@ import { SCHEMA_VERSION } from './schema.js';
 
 export interface MappingRow {
   symbolId: string;
-  engine: 'scip' | 'ts';
+  engine: 'scip' | 'ts' | 'vue';
   engineRef: string;
   matchQuality: string;
   evidence: unknown;
@@ -38,6 +43,8 @@ export interface CommitInput {
   symbols: readonly SymbolRecord[];
   references: readonly ReferenceRecord[];
   mappingRows: readonly MappingRow[];
+  components: readonly ComponentRecord[];
+  vueFileMeta: readonly VueFileMetaRecord[];
 }
 
 export interface CommitResult {
@@ -143,6 +150,8 @@ export function recoverPending(dbPath: string): number {
         if (buildId === '') continue;
         db.prepare('delete from "references" where build_id = ?').run(buildId);
         db.prepare('delete from symbol_map where build_id = ?').run(buildId);
+        db.prepare('delete from components where build_id = ?').run(buildId);
+        db.prepare('delete from vue_file_meta where build_id = ?').run(buildId);
         db.prepare('delete from symbols where build_id = ?').run(buildId);
         db.prepare('delete from files where build_id = ?').run(buildId);
         db.prepare('delete from build_record where build_id = ?').run(buildId);
@@ -179,6 +188,8 @@ function pruneBuilds(db: DatabaseSync, keep = 2): void {
     for (const buildId of old) {
       db.prepare('delete from "references" where build_id = ?').run(buildId);
       db.prepare('delete from symbol_map where build_id = ?').run(buildId);
+      db.prepare('delete from components where build_id = ?').run(buildId);
+      db.prepare('delete from vue_file_meta where build_id = ?').run(buildId);
       db.prepare('delete from symbols where build_id = ?').run(buildId);
       db.prepare('delete from files where build_id = ?').run(buildId);
       db.prepare('delete from build_record where build_id = ?').run(buildId);
@@ -235,7 +246,7 @@ export function commitBuild(input: CommitInput): CommitResult {
           input.buildId,
           file.path,
           file.sourceHash,
-          file.path.endsWith('.tsx') ? 'tsx' : 'ts',
+          file.language,
           file.size,
           'indexed',
         );
@@ -312,6 +323,43 @@ export function commitBuild(input: CommitInput): CommitResult {
           row.matchQuality,
           JSON.stringify(row.evidence),
           row.analyzerVersion,
+        );
+      }
+
+      const insertComponent = db.prepare(
+        `insert into components(build_id, symbol_id, name, props_json, emits_json, slots_json, props_resolved, props_total, analysis_engine, source)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const component of input.components) {
+        insertComponent.run(
+          input.buildId,
+          component.symbolId,
+          component.name,
+          JSON.stringify(component.props),
+          JSON.stringify(component.emits),
+          JSON.stringify(component.slots),
+          component.propsCoverage.resolved,
+          component.propsCoverage.total,
+          component.analysisEngine,
+          component.source,
+        );
+      }
+
+      const insertVueMeta = db.prepare(
+        `insert into vue_file_meta(build_id, path, source_hash, projector_version, language_core_version, generated_bytes, generated_at, filtered_internal, template_edges)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const meta of input.vueFileMeta) {
+        insertVueMeta.run(
+          input.buildId,
+          meta.path,
+          meta.sourceHash,
+          meta.projectorVersion,
+          meta.languageCoreVersion,
+          meta.generatedBytes,
+          meta.generatedAt,
+          meta.filteredInternal,
+          meta.templateEdges,
         );
       }
 

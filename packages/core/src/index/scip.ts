@@ -41,6 +41,8 @@ export interface ScipRunOptions {
   rootPath: string;
   outputPath: string;
   timeoutMs?: number;
+  /** Phase 02: index a generated shadow tsconfig instead of `<root>/tsconfig.json`. */
+  tsconfigPath?: string;
 }
 
 export interface ScipRunResult {
@@ -140,6 +142,9 @@ export async function runScipIndex(options: ScipRunOptions): Promise<ScipRunResu
     indexPath,
     '--no-progress-bar',
   ];
+  if (options.tsconfigPath !== undefined) {
+    args.push(path.resolve(options.tsconfigPath));
+  }
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const startedAt = Date.now();
 

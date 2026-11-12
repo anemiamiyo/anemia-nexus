@@ -2,7 +2,7 @@ import { sha256Base32, sha256Hex } from '../util/hash.js';
 import { stableStringify } from '../util/stable-json.js';
 import { ANALYZER_VERSION } from './analyzer.js';
 
-export const SCHEMA_VERSION = 1;
+export { SCHEMA_VERSION } from '../store/schema.js';
 
 export interface BuildFingerprintFields {
   filesHash: string;

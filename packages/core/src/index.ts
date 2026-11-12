@@ -43,6 +43,7 @@ export type {
 } from './status.js';
 export { runDoctor, unsupportedDoctorFlag } from './doctor.js';
 export type { DoctorReport, DoctorCheck, DoctorOptions, CheckStatus } from './doctor.js';
+export { dumpVueMap } from './vue/dump.js';
 export { querySymbol, queryReferences, querySearch } from './query/service.js';
 export type {
   QueryOptions,

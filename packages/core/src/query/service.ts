@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import type {
+  ComponentRecord,
   Counts,
   Coverage,
   QueryEnvelope,
@@ -15,6 +16,7 @@ import { databasePath, manifestPath, readManifest } from '../store/manifest.js';
 import {
   findSymbolsByName,
   openReadStore,
+  readComponent,
   readReferencesTo,
   readSymbolById,
   searchSymbols,
@@ -55,6 +57,7 @@ export interface SymbolItem {
   volatile: boolean;
   anonymous: boolean;
   mappingQuality: string;
+  component?: ComponentRecord;
   history?: Array<{
     validFromBuild: string;
     validToBuild: string | null;
@@ -222,6 +225,7 @@ function aggregateCoverage(roots: readonly RootStatus[]): Coverage {
     resolved: 0,
     unresolved: 0,
     unmapped: 0,
+    filteredInternal: 0,
   };
   for (const root of roots) {
     coverage.filesCovered += root.coverage.filesCovered;
@@ -231,6 +235,7 @@ function aggregateCoverage(roots: readonly RootStatus[]): Coverage {
     coverage.resolved += root.coverage.resolved;
     coverage.unresolved += root.coverage.unresolved;
     coverage.unmapped += root.coverage.unmapped;
+    coverage.filteredInternal += root.coverage.filteredInternal ?? 0;
   }
   return coverage;
 }
@@ -267,6 +272,10 @@ function toSymbolItem(
     anonymous: symbol.anonymous,
     mappingQuality: symbol.mappingQuality,
   };
+  if (symbol.kind === 'component') {
+    const component = readComponent(store, symbol.symbolId);
+    if (component !== null) item.component = component;
+  }
   if (withHistory) {
     item.history = readHistory(store.db, symbol.symbolId).map((row) => ({
       validFromBuild: row.validFromBuild,
@@ -317,6 +326,12 @@ function resolveSymbol(store: ReadStore, identifier: string): SymbolRecord {
 }
 
 function reasonFor(reference: ReferenceRecord, target: SymbolRecord): string {
+  if (reference.role.startsWith('template:')) {
+    if (reference.role === 'template:component-use') return 'component-use';
+    if (reference.role === 'template:interpolation') return 'interpolation';
+    if (reference.role === 'template:dynamic-argument') return 'template-binding';
+    return 'template-binding';
+  }
   if (reference.relationClass === 'heuristic') return 'heuristic-match';
   if (reference.kind === 'import') return target.isPublic ? 'public-api' : 'same-module';
   if (reference.sourceFile === target.path) return 'same-module';
@@ -420,6 +435,7 @@ export async function queryReferences(
   options: QueryOptions,
   identifier: string,
   includeHeuristic: boolean,
+  includeTemplate = true,
 ): Promise<ReferencesQueryResult> {
   const context = await prepareContext(options);
   const roots = selectRoots(context, options);
@@ -441,7 +457,9 @@ export async function queryReferences(
   try {
     const symbol = resolveSymbol(store, identifier);
     const rows = readReferencesTo(store, symbol.symbolId).filter(
-      (row) => includeHeuristic || row.relationClass !== 'heuristic',
+      (row) =>
+        (includeHeuristic || row.relationClass !== 'heuristic') &&
+        (includeTemplate || !row.role.startsWith('template:')),
     );
     const items: ReferenceItem[] = rows.map((row) => ({
       rootId: root.rootId,
@@ -468,7 +486,7 @@ export async function queryReferences(
       buildFingerprint: root.buildFingerprint,
       warnings: context.warnings,
       budget: context.budget,
-      notes: [],
+      notes: includeTemplate ? [] : ['template edges are not included (--no-template)'],
       mode: root.degraded.includes('syntax-only') ? 'syntax-only' : 'normal',
     });
     result.counts.certain = rows.filter((row) => row.relationClass === 'certain').length;

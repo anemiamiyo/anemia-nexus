@@ -1,11 +1,13 @@
 /**
- * Declarative schema v1. `schemaVersion` and the DDL live in this one module
- * (docs/05-data-model.md 5.5). Incompatible changes require a new version and
- * a rebuild; Phase 01 has no migration path.
+ * Declarative schema. `schemaVersion` and the DDL live in this one module
+ * (docs/05-data-model.md 5.5). Phase 02 adds the Vue tables required by
+ * docs/04-architecture.md 4.1.1 and the Component entity of
+ * docs/05-data-model.md 5.1; existing Phase 01 column semantics are unchanged.
+ * Incompatible changes require a new version and a rebuild.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
-export const DDL_V1 = `
+export const DDL_CURRENT = `
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -132,6 +134,35 @@ CREATE TABLE IF NOT EXISTS symbol_id_history (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS symbol_id_history_symbol_idx ON symbol_id_history (symbol_id, valid_from_build);
+
+CREATE TABLE IF NOT EXISTS vue_file_meta (
+  build_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  source_hash TEXT NOT NULL,
+  projector_version TEXT NOT NULL,
+  language_core_version TEXT NOT NULL,
+  generated_bytes INTEGER NOT NULL,
+  generated_at TEXT NOT NULL,
+  filtered_internal INTEGER NOT NULL,
+  template_edges INTEGER NOT NULL,
+  PRIMARY KEY (build_id, path)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS components (
+  build_id TEXT NOT NULL,
+  symbol_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  props_json TEXT NOT NULL,
+  emits_json TEXT NOT NULL,
+  slots_json TEXT NOT NULL,
+  props_resolved INTEGER NOT NULL,
+  props_total INTEGER NOT NULL,
+  analysis_engine TEXT NOT NULL,
+  source TEXT NOT NULL,
+  PRIMARY KEY (build_id, symbol_id)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS components_name_idx ON components (name);
 `;
 
 export interface RequiredIndex {

@@ -1,0 +1,42 @@
+{
+  "src/App.vue": {
+    "props": [],
+    "emits": [],
+    "slots": [],
+    "propsCoverage": { "resolved": 0, "total": 0 }
+  },
+  "src/components/ChildCard.vue": {
+    "props": [
+      { "name": "count", "typeText": "number", "required": false, "resolved": true },
+      { "name": "disabled", "typeText": "boolean", "required": false, "resolved": true },
+      { "name": "formatter", "typeText": "Formatter", "required": true, "resolved": true },
+      { "name": "title", "typeText": "string", "required": true, "resolved": true }
+    ],
+    "emits": ["click", "select"],
+    "slots": ["default"],
+    "propsCoverage": { "resolved": 4, "total": 4 }
+  },
+  "src/components/EdgeCase.vue": {
+    "props": [],
+    "emits": [],
+    "slots": [],
+    "propsCoverage": { "resolved": 0, "total": 0 }
+  },
+  "src/components/ListPanel.vue": {
+    "props": [{ "name": "items", "typeText": "string[]", "required": true, "resolved": true }],
+    "emits": [],
+    "slots": ["default", "row"],
+    "propsCoverage": { "resolved": 1, "total": 1 }
+  },
+  "src/components/UnresolvedProps.vue": {
+    "props": [
+      { "name": "anything", "typeText": "any", "required": true, "resolved": false },
+      { "name": "callback", "typeText": "Deep<{ value: number }>", "required": true, "resolved": true },
+      { "name": "missing", "typeText": "never", "required": true, "resolved": false },
+      { "name": "nested", "typeText": "{ deep: Array<{ value: string }> }", "required": false, "resolved": true }
+    ],
+    "emits": [],
+    "slots": ["header", "neverSlot"],
+    "propsCoverage": { "resolved": 2, "total": 4, "unresolved": ["anything", "missing"] }
+  }
+}

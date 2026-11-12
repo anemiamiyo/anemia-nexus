@@ -1,7 +1,15 @@
 import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 
-import type { ReferenceRecord, SymbolRecord } from '../model.js';
+import type {
+  ComponentEmit,
+  ComponentProp,
+  ComponentRecord,
+  ComponentSlot,
+  ReferenceRecord,
+  SymbolRecord,
+  VueFileMetaRecord,
+} from '../model.js';
 import {
   latestCommittedBuild,
   openDatabase,
@@ -191,5 +199,76 @@ export function sampleFilePaths(store: ReadStore, limit = 10): string[] {
 
 export function countFiles(store: ReadStore): number {
   const row = store.db.prepare('select count(*) as count from files').get() as { count?: unknown };
+  return typeof row.count === 'number' ? row.count : 0;
+}
+
+function parseJsonArray<T>(value: unknown): T[] {
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function readComponent(store: ReadStore, symbolId: string): ComponentRecord | null {
+  const row = store.db
+    .prepare(
+      `select symbol_id, name, props_json, emits_json, slots_json, props_resolved, props_total, analysis_engine, source
+       from components where build_id = ? and symbol_id = ?`,
+    )
+    .get(store.build.buildId, symbolId) as Record<string, unknown> | undefined;
+  if (row === undefined) return null;
+  const props = parseJsonArray<ComponentProp>(row.props_json);
+  const emits = parseJsonArray<ComponentEmit>(row.emits_json);
+  const slots = parseJsonArray<ComponentSlot>(row.slots_json);
+  const total = Number(row.props_total ?? 0);
+  const resolved = Number(row.props_resolved ?? 0);
+  return {
+    symbolId: String(row.symbol_id ?? ''),
+    name: String(row.name ?? ''),
+    props,
+    emits,
+    slots,
+    propsCoverage: {
+      resolved,
+      total,
+      unresolved: props
+        .filter((prop) => !prop.resolved)
+        .map((prop) => ({
+          name: prop.name,
+          typeText: prop.typeText,
+          reason: prop.reason ?? 'unresolved-type',
+        })),
+    },
+    analysisEngine: String(row.analysis_engine ?? ''),
+    source: String(row.source ?? 'none') as ComponentRecord['source'],
+  };
+}
+
+export function readVueFileMeta(store: ReadStore): VueFileMetaRecord[] {
+  const rows = store.db
+    .prepare(
+      `select path, source_hash, projector_version, language_core_version, generated_bytes, generated_at, filtered_internal, template_edges
+       from vue_file_meta where build_id = ? order by path`,
+    )
+    .all(store.build.buildId) as Array<Record<string, unknown>>;
+  return rows.map((row) => ({
+    path: String(row.path ?? ''),
+    sourceHash: String(row.source_hash ?? ''),
+    projectorVersion: String(row.projector_version ?? ''),
+    languageCoreVersion: String(row.language_core_version ?? ''),
+    generatedBytes: Number(row.generated_bytes ?? 0),
+    generatedAt: String(row.generated_at ?? ''),
+    filteredInternal: Number(row.filtered_internal ?? 0),
+    templateEdges: Number(row.template_edges ?? 0),
+  }));
+}
+
+export function countComponents(store: ReadStore): number {
+  const row = store.db
+    .prepare('select count(*) as count from components where build_id = ?')
+    .get(store.build.buildId) as { count?: unknown };
   return typeof row.count === 'number' ? row.count : 0;
 }

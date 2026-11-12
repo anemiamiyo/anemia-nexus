@@ -11,9 +11,16 @@ import { discoverRoots, type RootCandidate } from '../discovery/roots.js';
 import { IgnoreMatcher } from '../discovery/ignore.js';
 import { scanFiles, filesHash, type ScanResult } from '../discovery/scan.js';
 import { readTsconfig } from '../discovery/tsconfig.js';
-import { ANALYZER_VERSION } from './analyzer.js';
+import { ANALYZER_VERSION, VUE_LANGUAGE_CORE_VERSION, VUE_PROJECTOR_VERSION } from './analyzer.js';
 import { collectDeclarations, createSyntaxProgram } from './declarations.js';
-import type { DeclarationRecord } from '../model.js';
+import type {
+  ComponentRecord,
+  DeclarationRecord,
+  MappingQuality,
+  ReferenceRecord,
+  VueAnalysisSummary,
+  VueFileMetaRecord,
+} from '../model.js';
 import {
   assignIdentities,
   mapSymbolsAndReferences,
@@ -21,6 +28,7 @@ import {
   locatorKey,
   type IdentityAssignment,
   type MappingResult,
+  type MappingStats,
   type PreviousIdentity,
 } from './mapping.js';
 import {
@@ -30,7 +38,7 @@ import {
   SCHEMA_VERSION,
   type BuildFingerprintFields,
 } from './fingerprint.js';
-import { readScipIndex, runScipIndex, type ScipIndexData } from './scip.js';
+import { readScipIndex, runScipIndex, type ScipDocument, type ScipIndexData } from './scip.js';
 import {
   commitBuild,
   readPreviousIdentities,
@@ -48,9 +56,25 @@ import {
   type RootManifest,
 } from '../store/manifest.js';
 import { withRootLock } from '../store/lock.js';
+import { projectVueFile, type VueProjection } from '../vue/project.js';
+import {
+  collectVueSymbols,
+  type ComponentDraft,
+  type VueDeclaration,
+} from '../vue/declarations.js';
+import { mapVueSymbolsAndReferences, type VueMappingResult } from '../vue/references.js';
+import { writeShadowProject, type ShadowProject } from '../vue/shadow.js';
 
 export interface BuildProgressEvent {
-  type: 'root-start' | 'scan' | 'scip' | 'write' | 'root-done' | 'root-failed' | 'workspace-done';
+  type:
+    | 'root-start'
+    | 'scan'
+    | 'vue'
+    | 'scip'
+    | 'write'
+    | 'root-done'
+    | 'root-failed'
+    | 'workspace-done';
   rootId: string;
   message: string;
 }
@@ -67,6 +91,7 @@ export interface RootBuildResult {
   errorCode: string | null;
   errorMessage: string | null;
   coverage: RootManifest['coverage'] | null;
+  vue?: VueAnalysisSummary;
   degraded: string[];
 }
 
@@ -88,10 +113,14 @@ interface RootAnalysis {
   tsconfigOk: boolean;
   assignments: IdentityAssignment[];
   collisions: number;
-  index: ScipIndexData | null;
   mapping: MappingResult;
+  vueMapping: VueMappingResult | null;
+  vueDeclarationSet: ReadonlySet<DeclarationRecord>;
+  components: ComponentRecord[];
+  vueFileMeta: VueFileMetaRecord[];
+  vue: VueAnalysisSummary;
   degraded: string[];
-  timings: { scanMs: number; analyzeMs: number; scipMs: number; mapMs: number };
+  timings: { scanMs: number; analyzeMs: number; vueMs: number; scipMs: number; mapMs: number };
 }
 
 function emit(options: BuildOptions, event: BuildProgressEvent): void {
@@ -165,34 +194,234 @@ function toPreviousIdentities(
   return map;
 }
 
-function mappingRows(
-  assignments: readonly IdentityAssignment[],
-  mapping: MappingResult,
-): MappingRow[] {
+function mappingRows(input: {
+  assignments: readonly IdentityAssignment[];
+  vueDeclarationSet: ReadonlySet<DeclarationRecord>;
+  vueMapping: VueMappingResult | null;
+  qualityBySymbolId: ReadonlyMap<string, MappingQuality>;
+}): MappingRow[] {
   const rows: MappingRow[] = [];
-  for (const assignment of assignments) {
-    const scipSymbol = mapping.scipSymbolBySymbolId.get(assignment.symbolId) ?? null;
+  for (const assignment of input.assignments) {
+    const declaration = assignment.declaration;
+    const quality = input.qualityBySymbolId.get(assignment.symbolId) ?? 'unmapped';
+    if (input.vueDeclarationSet.has(declaration)) {
+      const vueDeclaration = declaration as VueDeclaration;
+      const anchor = vueDeclaration.generatedAnchor;
+      const anchorRef =
+        anchor === null
+          ? `vue:${vueDeclaration.path}#component`
+          : `vue:${vueDeclaration.path}#${anchor.nameLine}:${anchor.nameCol}`;
+      const scipSymbol = input.vueMapping?.scipSymbolBySymbolId.get(assignment.symbolId) ?? null;
+      rows.push({
+        symbolId: assignment.symbolId,
+        engine: 'scip',
+        engineRef: scipSymbol ?? '',
+        matchQuality: quality,
+        evidence: {
+          anchor: `${vueDeclaration.path}:${vueDeclaration.nameLine}:${vueDeclaration.nameCol}`,
+          descriptor: scipSymbol === null ? '' : scipSymbol.slice(-160),
+        },
+        analyzerVersion: ANALYZER_VERSION.scip,
+      });
+      rows.push({
+        symbolId: assignment.symbolId,
+        engine: 'ts',
+        engineRef: anchorRef,
+        matchQuality: anchor === null ? 'unmapped' : quality,
+        evidence: { projector: VUE_PROJECTOR_VERSION, synthetic: anchor === null },
+        analyzerVersion: ANALYZER_VERSION.typescript,
+      });
+      rows.push({
+        symbolId: assignment.symbolId,
+        engine: 'vue',
+        engineRef: anchorRef,
+        matchQuality: anchor === null ? 'exact' : quality,
+        evidence: {
+          projector: VUE_PROJECTOR_VERSION,
+          languageCoreVersion: VUE_LANGUAGE_CORE_VERSION,
+        },
+        analyzerVersion: VUE_LANGUAGE_CORE_VERSION,
+      });
+      continue;
+    }
+    const scipSymbol = input.vueMapping?.scipSymbolBySymbolId.get(assignment.symbolId) ?? null;
+    void scipSymbol;
     rows.push({
       symbolId: assignment.symbolId,
       engine: 'scip',
-      engineRef: scipSymbol ?? '',
-      matchQuality: assignment.mappingQuality,
+      engineRef: assignment.scipSymbol ?? '',
+      matchQuality: quality,
       evidence: {
-        anchor: `${assignment.declaration.path}:${assignment.declaration.nameLine}:${assignment.declaration.nameCol}`,
-        descriptor: scipSymbol === null ? '' : scipSymbol.slice(-160),
+        anchor: `${declaration.path}:${declaration.nameLine}:${declaration.nameCol}`,
+        descriptor: assignment.scipSymbol === null ? '' : assignment.scipSymbol.slice(-160),
       },
       analyzerVersion: ANALYZER_VERSION.scip,
     });
     rows.push({
       symbolId: assignment.symbolId,
       engine: 'ts',
-      engineRef: locatorKey(assignment.declaration),
-      matchQuality: assignment.mappingQuality,
-      evidence: { kind: assignment.declaration.kind, nameChain: assignment.declaration.nameChain },
+      engineRef: locatorKey(declaration),
+      matchQuality: quality,
+      evidence: { kind: declaration.kind, nameChain: declaration.nameChain },
       analyzerVersion: ANALYZER_VERSION.typescript,
     });
   }
   return rows;
+}
+
+function emptyStats(eligible = 0): MappingStats {
+  return {
+    eligible,
+    exact: 0,
+    structural: 0,
+    conflict: 0,
+    ambiguous: 0,
+    unmapped: eligible,
+    mappingSuccessRate: 0,
+    falseMatchCount: 0,
+    collisions: 0,
+  };
+}
+
+function unmappedMapping(
+  assignments: readonly IdentityAssignment[],
+  reason: string,
+): MappingResult {
+  return {
+    symbols: symbolsFromAssignments(assignments, 'unmapped'),
+    references: [],
+    scipSymbolBySymbolId: new Map(assignments.map((assignment) => [assignment.symbolId, null])),
+    scipSymbolToSymbolId: new Map(),
+    stats: emptyStats(assignments.length),
+    unmappedReasonCounts: { [reason]: assignments.length },
+    externalReferences: 0,
+    localOrUnmappedReferences: 0,
+  };
+}
+
+function mergeMappings(
+  ts: MappingResult,
+  vue: MappingResult | null,
+  collisions: number,
+): MappingResult {
+  if (vue === null) {
+    const stats = { ...ts.stats, collisions };
+    stats.mappingSuccessRate =
+      stats.eligible === 0 ? 0 : (stats.exact + stats.structural) / stats.eligible;
+    return {
+      ...ts,
+      stats,
+      scipSymbolBySymbolId: new Map(ts.scipSymbolBySymbolId),
+      scipSymbolToSymbolId: new Map(ts.scipSymbolToSymbolId),
+    };
+  }
+  const stats: MappingStats = {
+    eligible: ts.stats.eligible + vue.stats.eligible,
+    exact: ts.stats.exact + vue.stats.exact,
+    structural: ts.stats.structural + vue.stats.structural,
+    conflict: ts.stats.conflict + vue.stats.conflict,
+    ambiguous: ts.stats.ambiguous + vue.stats.ambiguous,
+    unmapped: ts.stats.unmapped + vue.stats.unmapped,
+    mappingSuccessRate: 0,
+    falseMatchCount: ts.stats.falseMatchCount + vue.stats.falseMatchCount,
+    collisions,
+  };
+  stats.mappingSuccessRate =
+    stats.eligible === 0 ? 0 : (stats.exact + stats.structural) / stats.eligible;
+  const unmappedReasonCounts: Record<string, number> = { ...ts.unmappedReasonCounts };
+  for (const [reason, count] of Object.entries(vue.unmappedReasonCounts)) {
+    unmappedReasonCounts[reason] = (unmappedReasonCounts[reason] ?? 0) + count;
+  }
+  const symbols = [...ts.symbols, ...vue.symbols].sort((left, right) =>
+    left.symbolId < right.symbolId ? -1 : left.symbolId > right.symbolId ? 1 : 0,
+  );
+  const references = [...ts.references, ...vue.references].sort(compareReferences);
+  return {
+    symbols,
+    references,
+    scipSymbolBySymbolId: new Map([...ts.scipSymbolBySymbolId, ...vue.scipSymbolBySymbolId]),
+    scipSymbolToSymbolId: new Map([...ts.scipSymbolToSymbolId, ...vue.scipSymbolToSymbolId]),
+    stats,
+    unmappedReasonCounts,
+    externalReferences: ts.externalReferences + vue.externalReferences,
+    localOrUnmappedReferences: ts.localOrUnmappedReferences + vue.localOrUnmappedReferences,
+  };
+}
+
+function compareReferences(left: ReferenceRecord, right: ReferenceRecord): number {
+  if (left.sourceFile !== right.sourceFile) return left.sourceFile < right.sourceFile ? -1 : 1;
+  if (left.line !== right.line) return left.line - right.line;
+  if (left.col !== right.col) return left.col - right.col;
+  const leftTarget = left.targetSymbolId ?? '';
+  const rightTarget = right.targetSymbolId ?? '';
+  return leftTarget < rightTarget ? -1 : leftTarget > rightTarget ? 1 : 0;
+}
+
+function zeroVueSummary(files: number): VueAnalysisSummary {
+  return {
+    files,
+    projected: 0,
+    failed: 0,
+    symbols: 0,
+    mappedSymbols: 0,
+    unmappedSymbols: 0,
+    filteredInternal: 0,
+    components: 0,
+    propsCoverage: { resolved: 0, total: 0, unresolved: [] },
+    templateEdges: { total: 0, certain: 0, heuristic: 0, dynamicUnresolved: 0 },
+    unmappedReasons: {},
+    errors: [],
+  };
+}
+
+function buildVueSummary(input: {
+  vueFiles: number;
+  projections: readonly VueProjection[];
+  declarations: readonly VueDeclaration[];
+  components: readonly ComponentDraft[];
+  vueMapping: VueMappingResult | null;
+  declarationFilteredInternal: number;
+  errors: readonly string[];
+}): VueAnalysisSummary {
+  const syntheticComponents = input.declarations.filter(
+    (declaration) => declaration.syntheticComponent,
+  ).length;
+  const stats = input.vueMapping?.stats;
+  const propsCoverage: VueAnalysisSummary['propsCoverage'] = {
+    resolved: 0,
+    total: 0,
+    unresolved: [],
+  };
+  for (const component of input.components) {
+    propsCoverage.resolved += component.propsCoverage.resolved;
+    propsCoverage.total += component.propsCoverage.total;
+    for (const entry of component.propsCoverage.unresolved) {
+      propsCoverage.unresolved.push({ ...entry, name: `${component.name}.${entry.name}` });
+    }
+  }
+  return {
+    files: input.vueFiles,
+    projected: input.projections.length,
+    failed: input.vueFiles - input.projections.length,
+    symbols: input.declarations.length,
+    mappedSymbols: (stats?.exact ?? 0) + (stats?.structural ?? 0),
+    unmappedSymbols: (stats?.unmapped ?? 0) + syntheticComponents,
+    filteredInternal: input.declarationFilteredInternal + (input.vueMapping?.filteredInternal ?? 0),
+    components: input.components.length,
+    propsCoverage,
+    templateEdges: input.vueMapping?.templateEdges ?? {
+      total: 0,
+      certain: 0,
+      heuristic: 0,
+      dynamicUnresolved: 0,
+    },
+    unmappedReasons: {
+      ...(input.vueMapping?.unmappedReasonCounts ?? {}),
+      'synthetic-component':
+        input.vueMapping?.unmappedReasonCounts['synthetic-component'] ?? syntheticComponents,
+    },
+    errors: input.errors.slice(0, 20),
+  };
 }
 
 async function analyzeRoot(
@@ -200,6 +429,7 @@ async function analyzeRoot(
   effective: EffectiveRootConfig,
   options: BuildOptions,
   tmpToken: string,
+  startedAt: string,
 ): Promise<RootAnalysis> {
   const rootAbs = root.absolutePath;
   const ignore = new IgnoreMatcher(effective.ignore);
@@ -221,34 +451,125 @@ async function analyzeRoot(
   const scanMs = Date.now() - scanStarted;
   if (scan.filesFailed.length > 0) degraded.push('files-failed');
   if (scan.filesSkippedBySize > 0) degraded.push('files-skipped-by-size');
+  const tsFiles = scan.files.filter((file) => file.language !== 'vue');
+  const vueFiles = scan.files.filter((file) => file.language === 'vue');
   emit(options, {
     type: 'scan',
     rootId: root.rootId,
-    message: `${scan.files.length} TS/TSX files (${scan.filesIgnored} ignored, ${scan.filesFailed.length} failed)`,
+    message: `${scan.files.length} files (${tsFiles.length} TS/TSX, ${vueFiles.length} Vue; ${scan.filesIgnored} ignored, ${scan.filesFailed.length} failed)`,
   });
 
   const analyzeStarted = Date.now();
-  const scannedNames = new Set(scan.files.map((file) => file.absolutePath));
+  const scannedNames = new Set(tsFiles.map((file) => file.absolutePath));
   const fileNames = tsconfig.ok
     ? tsconfig.fileNames.filter((fileName) => scannedNames.has(path.resolve(fileName)))
-    : scan.files.map((file) => file.absolutePath);
+    : tsFiles.map((file) => file.absolutePath);
   const program = createSyntaxProgram(fileNames, tsconfig.options);
-  const declarations: DeclarationRecord[] = collectDeclarations(
-    program,
-    rootAbs,
-    options.projectRoot,
-    root.rootId,
-  );
-  const previous = toPreviousIdentities(
-    readPreviousIdentities(databasePath(options.projectRoot, root.rootId)),
-  );
-  const { assignments, collisions } = assignIdentities(declarations, root.rootId, previous);
-  const analyzeMs = Date.now() - analyzeStarted;
-  if (collisions > 0) degraded.push('hash-collisions');
+  const tsDeclarations = collectDeclarations(program, rootAbs, options.projectRoot, root.rootId);
 
-  let index: ScipIndexData | null = null;
+  const projections: VueProjection[] = [];
+  let shadow: ShadowProject | null = null;
+  let vueDeclarations: VueDeclaration[] = [];
+  let vueComponentDrafts: ComponentDraft[] = [];
+  let vueDeclarationFilteredInternal = 0;
+  let vueMapping: VueMappingResult | null = null;
+  let tsIndex: ScipIndexData | null = null;
+  let shadowDocuments: ScipDocument[] = [];
+  let vueFilteredByFile = new Map<string, number>();
   let scipMs = 0;
-  if (tsconfig.ok) {
+  const vueErrors: string[] = [];
+
+  const vueStarted = Date.now();
+  if (tsconfig.ok && vueFiles.length > 0) {
+    const projectionStarted = Date.now();
+    for (const file of vueFiles) {
+      const result = projectVueFile({
+        projectRoot: options.projectRoot,
+        rootAbsolutePath: rootAbs,
+        filePath: file.absolutePath,
+        compilerOptions: tsconfig.options as ts.CompilerOptions,
+      });
+      if (result.ok) projections.push(result.projection);
+      else {
+        degraded.push('vue-projection-failed');
+        vueErrors.push(`${result.error.path}: ${result.error.reason}`);
+      }
+    }
+    emit(options, {
+      type: 'vue',
+      rootId: root.rootId,
+      message: `${projections.length}/${vueFiles.length} SFCs projected in ${Date.now() - projectionStarted}ms`,
+    });
+    if (projections.length > 0) {
+      try {
+        shadow = writeShadowProject({
+          projectRoot: options.projectRoot,
+          rootAbsolutePath: rootAbs,
+          tmpToken,
+          projections,
+          tsconfigFileNames: tsconfig.fileNames,
+          compilerOptions: tsconfig.options as ts.CompilerOptions,
+        });
+        const scipStarted = Date.now();
+        const run = await runScipIndex({
+          projectRoot: options.projectRoot,
+          rootPath: rootAbs,
+          outputPath: path.join(shadow.shadowRoot, 'index.scip'),
+          tsconfigPath: shadow.tsconfigPath,
+        });
+        const rawIndex = readScipIndex(run.indexPath);
+        scipMs = Date.now() - scipStarted;
+        const prefix = shadow.documentPrefix.replace(/\/+$/, '');
+        const isShadowDocument = (documentPath: string): boolean =>
+          documentPath === prefix || documentPath.startsWith(`${prefix}/`);
+        const tsDocuments = rawIndex.documents.filter(
+          (document) => !isShadowDocument(document.path),
+        );
+        shadowDocuments = rawIndex.documents.filter((document) => isShadowDocument(document.path));
+        tsIndex = normalizeScipPaths({ ...rawIndex, documents: tsDocuments }, root.rootPath);
+        const shadowProgram = ts.createProgram({
+          rootNames: [...tsconfig.fileNames, ...shadow.shadowFiles],
+          options: {
+            ...(tsconfig.options as ts.CompilerOptions),
+            allowArbitraryExtensions: true,
+            noEmit: true,
+            rootDirs: [
+              shadow.shadowRoot,
+              rootAbs,
+              ...((tsconfig.options as ts.CompilerOptions).rootDirs ?? []),
+            ],
+          },
+        });
+        const collected = collectVueSymbols({
+          program: shadowProgram,
+          rootId: root.rootId,
+          projections,
+          shadowAbsoluteByProjectPath: shadow.shadowAbsoluteByProjectPath,
+          shadowDocPathByProjectPath: shadow.shadowDocPathByProjectPath,
+        });
+        vueDeclarations = collected.declarations;
+        vueComponentDrafts = collected.components;
+        vueDeclarationFilteredInternal = collected.filteredInternal;
+        vueFilteredByFile = collected.filteredInternalByFile;
+        if (collected.errors.length > 0) {
+          degraded.push('vue-projection-failed');
+          for (const error of collected.errors) vueErrors.push(error);
+        }
+        emit(options, {
+          type: 'vue',
+          rootId: root.rootId,
+          message: `${vueDeclarations.length} Vue declarations, ${vueComponentDrafts.length} components`,
+        });
+      } finally {
+        shadow?.cleanup();
+      }
+    }
+  } else if (vueFiles.length > 0) {
+    degraded.push('vue-syntax-only');
+  }
+  // Phase 01 path: no usable SFC projection (or no `.vue` files) still needs the
+  // TS/TSX SCIP index.
+  if (tsIndex === null && tsconfig.ok) {
     const scipStarted = Date.now();
     const scipOutput = path.join(options.projectRoot, '.nexus', 'tmp', tmpToken, 'index.scip');
     const run = await runScipIndex({
@@ -256,57 +577,119 @@ async function analyzeRoot(
       rootPath: rootAbs,
       outputPath: scipOutput,
     });
-    index = normalizeScipPaths(readScipIndex(run.indexPath), root.rootPath);
+    tsIndex = normalizeScipPaths(readScipIndex(run.indexPath), root.rootPath);
     scipMs = Date.now() - scipStarted;
     emit(options, {
       type: 'scip',
       rootId: root.rootId,
-      message: `${index.documents.length} documents in ${scipMs}ms`,
+      message: `${tsIndex.documents.length} documents in ${scipMs}ms`,
     });
   }
+  const vueMs = Math.max(Date.now() - vueStarted - scipMs, 0);
+
+  const previous = toPreviousIdentities(
+    readPreviousIdentities(databasePath(options.projectRoot, root.rootId)),
+  );
+  const allDeclarations = [...tsDeclarations, ...vueDeclarations];
+  const { assignments, collisions } = assignIdentities(allDeclarations, root.rootId, previous);
+  if (collisions > 0) degraded.push('hash-collisions');
+  const vueDeclarationSet = new Set<DeclarationRecord>(vueDeclarations);
+  const tsAssignments = assignments.filter(
+    (assignment) => !vueDeclarationSet.has(assignment.declaration),
+  );
+  const vueAssignments = assignments.filter((assignment) =>
+    vueDeclarationSet.has(assignment.declaration),
+  );
 
   const mapStarted = Date.now();
-  const mapping: MappingResult =
-    index === null
-      ? {
-          symbols: symbolsFromAssignments(assignments, 'unmapped'),
-          references: [],
-          scipSymbolBySymbolId: new Map(
-            assignments.map((assignment) => [assignment.symbolId, null]),
-          ),
-          stats: {
-            eligible: assignments.length,
-            exact: 0,
-            structural: 0,
-            conflict: 0,
-            ambiguous: 0,
-            unmapped: assignments.length,
-            mappingSuccessRate: 0,
-            falseMatchCount: 0,
-            collisions,
-          },
-          unmappedReasonCounts: { 'syntax-only': assignments.length },
-          externalReferences: 0,
-          localOrUnmappedReferences: 0,
-        }
+  const tsMapping =
+    tsIndex === null
+      ? unmappedMapping(tsAssignments, tsconfig.ok ? 'no-scip-index' : 'syntax-only')
       : mapSymbolsAndReferences({
-          index,
-          assignments,
+          index: tsIndex,
+          assignments: tsAssignments,
           sourceFiles: sourceFileMap(program, rootAbs, options.projectRoot),
           buildId: '',
         });
+  if (tsMapping.stats.conflict > 0) degraded.push('mapping-conflicts');
+  if (tsIndex !== null && vueAssignments.length > 0 && shadowDocuments.length > 0) {
+    const currentTsMapping = tsMapping;
+    vueMapping = mapVueSymbolsAndReferences({
+      buildId: '',
+      projections,
+      documents: shadowDocuments,
+      assignments: vueAssignments,
+      tsScipSymbolToSymbolId: currentTsMapping.scipSymbolToSymbolId,
+      components: vueComponentDrafts,
+    });
+    if (vueMapping.stats.conflict > 0) degraded.push('vue-mapping-conflicts');
+    if (vueMapping.stats.unmapped > 0) degraded.push('vue-unmapped');
+  }
+  const mapping = mergeMappings(tsMapping, vueMapping, collisions);
   const mapMs = Date.now() - mapStarted;
-  if (mapping.stats.conflict > 0) degraded.push('mapping-conflicts');
+
+  const vue = buildVueSummary({
+    vueFiles: vueFiles.length,
+    projections,
+    declarations: vueDeclarations,
+    components: vueComponentDrafts,
+    vueMapping,
+    declarationFilteredInternal: vueDeclarationFilteredInternal,
+    errors: vueErrors,
+  });
+  const components: ComponentRecord[] = [];
+  if (vueMapping !== null) {
+    const assignmentByDeclaration = new Map<DeclarationRecord, IdentityAssignment>();
+    for (const assignment of vueAssignments) {
+      assignmentByDeclaration.set(assignment.declaration, assignment);
+    }
+    for (const draft of vueComponentDrafts) {
+      const assignment = assignmentByDeclaration.get(draft.declaration);
+      if (assignment === undefined) continue;
+      components.push({
+        symbolId: assignment.symbolId,
+        name: draft.name,
+        props: draft.props,
+        emits: draft.emits,
+        slots: draft.slots,
+        propsCoverage: draft.propsCoverage,
+        analysisEngine: draft.analysisEngine,
+        source: draft.source,
+      });
+    }
+  }
+  const vueFileMeta: VueFileMetaRecord[] = projections.map((projection) => ({
+    path: projection.path,
+    sourceHash: projection.sourceHash,
+    projectorVersion: projection.projectorVersion,
+    languageCoreVersion: projection.languageCoreVersion,
+    generatedBytes: projection.generatedBytes,
+    generatedAt: startedAt,
+    filteredInternal:
+      (vueMapping?.perFile.get(projection.path)?.filteredInternal ?? 0) +
+      (vueFilteredByFile.get(projection.path) ?? 0),
+    templateEdges: vueMapping?.perFile.get(projection.path)?.templateEdges ?? 0,
+  }));
+  if (vueErrors.length > 0) {
+    // Errors are already reflected by `vue-projection-failed`; keep a bounded
+    // reason list in the manifest warnings only.
+    degraded.push('vue-errors');
+  }
+  const analyzeMs = Date.now() - analyzeStarted;
 
   return {
     scan,
     tsconfigOk: tsconfig.ok,
     assignments,
     collisions,
-    index,
     mapping,
-    degraded,
-    timings: { scanMs, analyzeMs, scipMs, mapMs },
+    vueMapping,
+    vueDeclarationSet,
+    components,
+    vueFileMeta,
+    vue,
+    degraded: [...new Set(degraded)].sort(),
+    timings: { scanMs, analyzeMs, vueMs: Math.max(vueMs, 0), scipMs, mapMs },
   };
 }
 
@@ -319,6 +702,7 @@ interface BuildRootOutcome {
   symbols: number;
   references: number;
   coverage: RootManifest['coverage'];
+  vue: VueAnalysisSummary;
   degraded: string[];
 }
 
@@ -338,6 +722,7 @@ function coverageOf(analysis: RootAnalysis): RootManifest['coverage'] {
     resolved,
     unresolved,
     unmapped: analysis.mapping.stats.unmapped,
+    filteredInternal: analysis.vue.filteredInternal,
     semanticCoverage:
       analysis.tsconfigOk && eligible > 0 ? analysis.mapping.stats.mappingSuccessRate : null,
     filesSkippedBySize: analysis.scan.filesSkippedBySize,
@@ -374,7 +759,7 @@ async function buildRoot(input: {
   const totalStarted = Date.now();
   const tmpToken = `${root.rootId}-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
   try {
-    const analysis = await analyzeRoot(root, input.effective, options, tmpToken);
+    const analysis = await analyzeRoot(root, input.effective, options, tmpToken, startedAt);
     const degraded = [...new Set(analysis.degraded)].sort();
     const fields: BuildFingerprintFields = {
       filesHash: filesHash(analysis.scan.files),
@@ -410,7 +795,16 @@ async function buildRoot(input: {
       files: analysis.scan.files,
       symbols: analysis.mapping.symbols,
       references,
-      mappingRows: mappingRows(analysis.assignments, analysis.mapping),
+      mappingRows: mappingRows({
+        assignments: analysis.assignments,
+        vueDeclarationSet: analysis.vueDeclarationSet,
+        vueMapping: analysis.vueMapping,
+        qualityBySymbolId: new Map(
+          analysis.mapping.symbols.map((symbol) => [symbol.symbolId, symbol.mappingQuality]),
+        ),
+      }),
+      components: analysis.components,
+      vueFileMeta: analysis.vueFileMeta,
     });
     const writeMs = Date.now() - writeStarted;
     const builtAt = new Date().toISOString();
@@ -419,7 +813,7 @@ async function buildRoot(input: {
     const coverage = coverageOf(analysis);
     const manifest: RootManifest = {
       schemaVersion: SCHEMA_VERSION,
-      indexVersion: 1,
+      indexVersion: 2,
       rootId: root.rootId,
       rootPath: root.rootPath,
       packageName: root.packageName,
@@ -443,6 +837,7 @@ async function buildRoot(input: {
         unresolvedReferences: coverage.unresolved,
       },
       coverage,
+      vue: analysis.vue,
       stats: {
         exact: analysis.mapping.stats.exact,
         structural: analysis.mapping.stats.structural,
@@ -451,10 +846,12 @@ async function buildRoot(input: {
         externalReferences: analysis.mapping.externalReferences,
         localOrUnmappedReferences: analysis.mapping.localOrUnmappedReferences,
         mappingSuccessRate: analysis.mapping.stats.mappingSuccessRate,
+        falseMatchCount: analysis.mapping.stats.falseMatchCount,
       },
       timings: {
         scanMs: analysis.timings.scanMs,
         analyzeMs: analysis.timings.analyzeMs,
+        vueMs: analysis.timings.vueMs,
         scipMs: analysis.timings.scipMs,
         mapMs: analysis.timings.mapMs,
         writeMs,
@@ -464,13 +861,13 @@ async function buildRoot(input: {
         peakRssMB,
         scipPeakRssMB: null,
         scipPeakRssUnavailableReason:
-          'SCIP runs in a child process; child RSS sampling is not available in Phase 01',
+          'SCIP runs in a child process; child RSS sampling is not provided in Phase 01/02',
       },
       dbBytes: sizes.dbBytes,
       walBytes: sizes.walBytes,
       degraded,
       warnings: degraded.map((entry) => ({
-        code: entry === 'syntax-only' ? 'E03' : 'E11',
+        code: entry === 'syntax-only' ? 'E03' : entry.startsWith('vue') ? 'E11' : 'E11',
         message: `degraded: ${entry}`,
         severity: 'warning' as const,
       })),
@@ -491,6 +888,7 @@ async function buildRoot(input: {
       symbols: analysis.mapping.symbols.length,
       references: references.length,
       coverage,
+      vue: analysis.vue,
       degraded,
     };
   } catch (error) {
@@ -509,6 +907,7 @@ function zerosCoverage(): RootManifest['coverage'] {
     resolved: 0,
     unresolved: 0,
     unmapped: 0,
+    filteredInternal: 0,
     semanticCoverage: null,
     filesSkippedBySize: 0,
     filesOutsideRoot: 0,
@@ -527,7 +926,7 @@ function recordFailure(
   const now = new Date().toISOString();
   const base: RootManifest = existing ?? {
     schemaVersion: SCHEMA_VERSION,
-    indexVersion: 1,
+    indexVersion: 2,
     rootId: root.rootId,
     rootPath: root.rootPath,
     packageName: root.packageName,
@@ -546,6 +945,7 @@ function recordFailure(
     staleness: 'failed',
     counts: { files: 0, symbols: 0, references: 0, unresolvedReferences: 0 },
     coverage: zerosCoverage(),
+    vue: zeroVueSummary(0),
     stats: {
       exact: 0,
       structural: 0,
@@ -554,8 +954,9 @@ function recordFailure(
       externalReferences: 0,
       localOrUnmappedReferences: 0,
       mappingSuccessRate: 0,
+      falseMatchCount: 0,
     },
-    timings: { scanMs: 0, analyzeMs: 0, scipMs: 0, mapMs: 0, writeMs: 0, totalMs: 0 },
+    timings: { scanMs: 0, analyzeMs: 0, vueMs: 0, scipMs: 0, mapMs: 0, writeMs: 0, totalMs: 0 },
     memory: { peakRssMB: 0, scipPeakRssMB: null, scipPeakRssUnavailableReason: null },
     dbBytes: 0,
     walBytes: 0,

@@ -50,6 +50,8 @@ export interface MappingResult {
   symbols: SymbolRecord[];
   references: ReferenceRecord[];
   scipSymbolBySymbolId: Map<string, string | null>;
+  /** Global SCIP symbol (non-local descriptors) -> symbolId, used by the Vue merger. */
+  scipSymbolToSymbolId: Map<string, string>;
   stats: MappingStats;
   unmappedReasonCounts: Record<string, number>;
   externalReferences: number;
@@ -451,6 +453,7 @@ export function mapSymbolsAndReferences(options: ExtractReferencesOptions): Mapp
     symbols,
     references,
     scipSymbolBySymbolId,
+    scipSymbolToSymbolId: scipToSymbolId,
     stats,
     unmappedReasonCounts,
     externalReferences,
@@ -465,7 +468,7 @@ export function symbolsFromAssignments(
   return assignments.map((assignment) => toSymbolRecord(assignment, mappingQuality));
 }
 
-function toSymbolRecord(
+export function toSymbolRecord(
   assignment: IdentityAssignment,
   mappingQuality: MappingQuality,
 ): SymbolRecord {

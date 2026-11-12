@@ -67,6 +67,7 @@ function summaryFields(data: Row): string[] {
       'resolved',
       'unresolved',
       'unmapped',
+      'filteredInternal',
     ]) {
       const value = num(coverage[key]);
       if (value !== null) parts.push(`coverage.${key}=${value}`);
@@ -96,10 +97,23 @@ function referenceLines(data: Row): string[] {
 }
 
 function symbolLines(data: Row): string[] {
-  return rowsOf(data).map(
-    (item) =>
+  const lines: string[] = [];
+  for (const item of rowsOf(data)) {
+    lines.push(
       `${str(item.path)}:${field(item.startLine)}:${field(item.startCol)}  ${str(item.kind)}  ${str(item.symbolId)}  ${str(item.nameChain)}  ${str(item.identityConfidence)}  ${str(item.surface, 'unknown')}`,
-  );
+    );
+    const component = asRecord(item.component);
+    if (component !== null) {
+      const coverage = asRecord(component.propsCoverage);
+      const props = Array.isArray(component.props) ? component.props.length : 0;
+      const emits = Array.isArray(component.emits) ? component.emits.length : 0;
+      const slots = Array.isArray(component.slots) ? component.slots.length : 0;
+      lines.push(
+        `  component props=${props} emits=${emits} slots=${slots} propsCoverage=${field(coverage?.resolved ?? 0)}/${field(coverage?.total ?? 0)} source=${str(component.source, 'none')}`,
+      );
+    }
+  }
+  return lines;
 }
 
 function statusLines(data: Row): string[] {
@@ -114,11 +128,17 @@ function statusLines(data: Row): string[] {
     if (Array.isArray(root.staleReason) && root.staleReason.length > 0) {
       lines.push(`  staleReason ${root.staleReason.map((entry) => String(entry)).join(', ')}`);
     }
+    const vue = asRecord(root.vue);
+    if (vue !== null) {
+      lines.push(
+        `  vue files=${field(vue.files)} projected=${field(vue.projected)} components=${field(vue.components)} mapped=${field(vue.mappedSymbols)} unmapped=${field(vue.unmappedSymbols)} filteredInternal=${field(vue.filteredInternal)}`,
+      );
+    }
   }
   const capabilities = asRecord(data.capabilities);
   if (capabilities) {
     lines.push(
-      `capabilities styleDependency=${field(capabilities.styleDependency)} styleSelector=${field(capabilities.styleSelector)} htmlFileRef=${field(capabilities.htmlFileRef)} vue=${field(capabilities.vue)} incremental=${field(capabilities.incremental)} mcpFormats=${field(capabilities.mcpFormats)}`,
+      `capabilities styleDependency=${field(capabilities.styleDependency)} styleSelector=${field(capabilities.styleSelector)} htmlFileRef=${field(capabilities.htmlFileRef)} vue=${field(capabilities.vue)} templateReferences=${field(capabilities.templateReferences)} incremental=${field(capabilities.incremental)} mcpFormats=${field(capabilities.mcpFormats)}`,
     );
   }
   validateLineLength(lines, 0);

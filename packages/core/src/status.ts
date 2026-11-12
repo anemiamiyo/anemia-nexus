@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import type { Counts, Coverage, StalenessState } from './model.js';
+import type { Counts, Coverage, StalenessState, VueAnalysisSummary } from './model.js';
 import type { LoadedConfig } from './config/load.js';
 import { loadConfig } from './config/load.js';
 import { resolveRootConfig } from './config/merge.js';
@@ -17,7 +17,8 @@ export const CAPABILITIES = {
   styleDependency: 'none',
   styleSelector: 'none',
   htmlFileRef: 'experimental-off',
-  vue: 'none',
+  vue: 'sfc-semantic',
+  templateReferences: ['component-use', 'template-binding', 'interpolation'],
   incremental: false,
   mcpFormats: [] as string[],
   dynamicUnresolved: 'marked',
@@ -50,6 +51,7 @@ export interface RootStatus {
   buildFingerprintPrefix: string | null;
   degraded: string[];
   coverage: Coverage;
+  vue: VueAnalysisSummary | null;
   staleReason: string[];
   lastSuccessAt: string | null;
   lastFailureAt: string | null;
@@ -89,6 +91,7 @@ const EMPTY_COVERAGE: Coverage = {
   resolved: 0,
   unresolved: 0,
   unmapped: 0,
+  filteredInternal: 0,
 };
 
 function relativeDisplay(projectRoot: string, target: string): string {
@@ -285,6 +288,7 @@ export async function statusReport(options: StatusOptions): Promise<StatusReport
         buildFingerprintPrefix: null,
         degraded: [],
         coverage: { ...EMPTY_COVERAGE },
+        vue: null,
         staleReason: [entry.error ?? 'manifest unreadable'],
         lastSuccessAt: null,
         lastFailureAt: null,
@@ -357,7 +361,12 @@ export async function statusReport(options: StatusOptions): Promise<StatusReport
       buildFingerprintPrefix:
         manifest.buildFingerprint === '' ? null : manifest.buildFingerprint.slice(0, 12),
       degraded: Array.isArray(manifest.degraded) ? manifest.degraded : [],
-      coverage: manifest.coverage ?? { ...EMPTY_COVERAGE },
+      coverage: {
+        ...EMPTY_COVERAGE,
+        ...(manifest.coverage ?? {}),
+        filteredInternal: manifest.coverage?.filteredInternal ?? 0,
+      },
+      vue: manifest.vue ?? null,
       staleReason: dbMissing
         ? ['index.db missing']
         : dbCorrupt
@@ -379,6 +388,7 @@ export async function statusReport(options: StatusOptions): Promise<StatusReport
     coverage.resolved += root.coverage.resolved;
     coverage.unresolved += root.coverage.unresolved;
     coverage.unmapped += root.coverage.unmapped;
+    coverage.filteredInternal += root.coverage.filteredInternal ?? 0;
   }
 
   const activeRoot = findActiveRoot(

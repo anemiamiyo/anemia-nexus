@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import type { Coverage, StalenessState } from '../model.js';
+import type { Coverage, StalenessState, VueAnalysisSummary } from '../model.js';
 import type { ANALYZER_VERSION } from '../index/analyzer.js';
 
 export interface ManifestCoverage extends Coverage {
@@ -14,6 +14,7 @@ export interface ManifestCoverage extends Coverage {
 export interface ManifestTimings {
   scanMs: number;
   analyzeMs: number;
+  vueMs: number;
   scipMs: number;
   mapMs: number;
   writeMs: number;
@@ -46,6 +47,7 @@ export interface RootManifest {
     unresolvedReferences: number;
   };
   coverage: ManifestCoverage;
+  vue?: VueAnalysisSummary;
   stats: {
     exact: number;
     structural: number;
@@ -54,6 +56,7 @@ export interface RootManifest {
     externalReferences: number;
     localOrUnmappedReferences: number;
     mappingSuccessRate: number;
+    falseMatchCount: number;
   };
   timings: ManifestTimings;
   memory: {

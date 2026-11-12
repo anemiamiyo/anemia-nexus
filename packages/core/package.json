@@ -22,6 +22,9 @@
   "sideEffects": false,
   "dependencies": {
     "@sourcegraph/scip-typescript": "0.4.0",
+    "@vue/compiler-dom": "3.5.45",
+    "@vue/compiler-sfc": "3.5.45",
+    "@vue/language-core": "3.3.14",
     "proper-lockfile": "4.1.2",
     "typescript": "5.9.3",
     "zod": "4.6.7"

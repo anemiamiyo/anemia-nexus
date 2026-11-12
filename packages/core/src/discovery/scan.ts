@@ -7,7 +7,9 @@ import { isInside, toPosix } from '../util/paths.js';
 import { contentHash } from '../util/hash.js';
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
-const TS_EXTENSIONS = new Set(['.ts', '.tsx']);
+const VUE_EXTENSION = '.vue';
+
+export type FileLanguage = 'ts' | 'tsx' | 'vue';
 
 export interface ScannedFile {
   /** Project-relative POSIX path. */
@@ -15,6 +17,7 @@ export interface ScannedFile {
   absolutePath: string;
   sourceHash: string;
   size: number;
+  language: FileLanguage;
 }
 
 export interface ScanProblem {
@@ -38,10 +41,16 @@ export interface ScanOptions {
   ignore: IgnoreMatcher;
   /** Absolute file names from a valid tsconfig; when absent a directory walk is used. */
   tsconfigFileNames?: readonly string[];
+  /** Phase 02: discover `.vue` files (default true; false keeps TS-only scans). */
+  scanVue?: boolean;
 }
 
-function isTsFile(fileName: string): boolean {
-  return TS_EXTENSIONS.has(path.extname(fileName).toLowerCase());
+export function fileLanguage(fileName: string): FileLanguage | null {
+  const extension = path.extname(fileName).toLowerCase();
+  if (extension === '.ts') return 'ts';
+  if (extension === '.tsx') return 'tsx';
+  if (extension === VUE_EXTENSION) return 'vue';
+  return null;
 }
 
 function realpathInside(projectRoot: string, rootPath: string, filePath: string): boolean {
@@ -59,13 +68,15 @@ function readScannedFile(
   rootPath: string,
   absolutePath: string,
   result: ScanResult,
+  seen: Set<string>,
 ): void {
   const relativeToProject = toPosix(path.relative(projectRoot, absolutePath));
-  const relativeToRoot = toPosix(path.relative(rootPath, absolutePath));
   if (!realpathInside(projectRoot, rootPath, absolutePath)) {
     result.outsideRoot.push({ path: relativeToProject, reason: 'outside project/root boundary' });
     return;
   }
+  const language = fileLanguage(absolutePath);
+  if (language === null) return;
   let stat: fs.Stats;
   try {
     stat = fs.lstatSync(absolutePath);
@@ -86,11 +97,79 @@ function readScannedFile(
       absolutePath,
       sourceHash: contentHash(text),
       size: stat.size,
+      language,
     });
   } catch {
     result.filesFailed.push({ path: relativeToProject, reason: 'cannot read file' });
   }
-  void relativeToRoot;
+  void seen;
+}
+
+function shouldSkipFile(
+  fileName: string,
+  projectRoot: string,
+  ignore: IgnoreMatcher,
+): { skip: boolean; ignored: boolean } {
+  const relative = toPosix(path.relative(projectRoot, path.resolve(fileName)));
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    return { skip: true, ignored: false };
+  }
+  if (isSensitiveFile(path.basename(fileName))) return { skip: true, ignored: true };
+  if (ignore.isFileIgnored(relative)) return { skip: true, ignored: true };
+  return { skip: false, ignored: false };
+}
+
+/**
+ * Deterministic discovery of `.vue` files. `tsconfig.fileNames` never contains
+ * `.vue`, so SFCs are always discovered by walking the root; the same ignore /
+ * sensitive-file / symlink / size rules apply.
+ */
+function scanVueFiles(
+  options: ScanOptions,
+  projectRootAbs: string,
+  result: ScanResult,
+  seen: Set<string>,
+): void {
+  const stack: Array<{ absolute: string; relative: string }> = [
+    { absolute: options.absoluteRoot, relative: '' },
+  ];
+  while (stack.length > 0) {
+    const current = stack.pop() as { absolute: string; relative: string };
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current.absolute, { withFileTypes: true });
+    } catch {
+      result.filesFailed.push({ path: current.relative || '.', reason: 'cannot read directory' });
+      continue;
+    }
+    entries.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries[index] as fs.Dirent;
+      const childAbsolute = path.join(current.absolute, entry.name);
+      const childRelative =
+        current.relative === '' ? entry.name : `${current.relative}/${entry.name}`;
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) {
+        if (
+          options.ignore.isDirectoryIgnored(childRelative) &&
+          !options.ignore.mayContainInclude(childRelative)
+        ) {
+          result.ignoredDirs += 1;
+          continue;
+        }
+        stack.push({ absolute: childAbsolute, relative: childRelative });
+        continue;
+      }
+      if (!entry.isFile() || fileLanguage(entry.name) !== 'vue') continue;
+      if (isSensitiveFile(entry.name) || options.ignore.isFileIgnored(childRelative)) {
+        result.filesIgnored += 1;
+        continue;
+      }
+      if (seen.has(childRelative)) continue;
+      seen.add(childRelative);
+      readScannedFile(projectRootAbs, options.absoluteRoot, childAbsolute, result, seen);
+    }
+  }
 }
 
 /**
@@ -99,6 +178,7 @@ function readScannedFile(
  */
 export function scanFiles(options: ScanOptions): ScanResult {
   const { projectRoot, absoluteRoot, ignore, tsconfigFileNames } = options;
+  const scanVue = options.scanVue !== false;
   const result: ScanResult = {
     files: [],
     filesIgnored: 0,
@@ -115,7 +195,8 @@ export function scanFiles(options: ScanOptions): ScanResult {
       left < right ? -1 : left > right ? 1 : 0,
     );
     for (const fileName of sorted) {
-      if (!isTsFile(fileName)) continue;
+      const language = fileLanguage(fileName);
+      if (language === null || language === 'vue') continue;
       const absolutePath = path.resolve(fileName);
       const relative = toPosix(path.relative(projectRootAbs, absolutePath));
       if (relative.startsWith('..') || path.isAbsolute(relative)) {
@@ -125,18 +206,16 @@ export function scanFiles(options: ScanOptions): ScanResult {
         });
         continue;
       }
-      if (isSensitiveFile(path.basename(absolutePath))) {
-        result.filesIgnored += 1;
-        continue;
-      }
-      if (ignore.isFileIgnored(relative)) {
-        result.filesIgnored += 1;
+      const skip = shouldSkipFile(absolutePath, projectRootAbs, ignore);
+      if (skip.skip) {
+        if (skip.ignored) result.filesIgnored += 1;
         continue;
       }
       if (seen.has(relative)) continue;
       seen.add(relative);
-      readScannedFile(projectRootAbs, absoluteRoot, absolutePath, result);
+      readScannedFile(projectRootAbs, absoluteRoot, absolutePath, result, seen);
     }
+    if (scanVue) scanVueFiles(options, projectRootAbs, result, seen);
   } else {
     const stack: Array<{ absolute: string; relative: string }> = [
       { absolute: absoluteRoot, relative: '' },
@@ -169,14 +248,15 @@ export function scanFiles(options: ScanOptions): ScanResult {
           continue;
         }
         if (!entry.isFile()) continue;
-        if (!isTsFile(entry.name)) continue;
+        const language = fileLanguage(entry.name);
+        if (language === null || (language === 'vue' && !scanVue)) continue;
         if (isSensitiveFile(entry.name) || ignore.isFileIgnored(childRelative)) {
           result.filesIgnored += 1;
           continue;
         }
         if (seen.has(childRelative)) continue;
         seen.add(childRelative);
-        readScannedFile(projectRootAbs, absoluteRoot, childAbsolute, result);
+        readScannedFile(projectRootAbs, absoluteRoot, childAbsolute, result, seen);
       }
     }
   }

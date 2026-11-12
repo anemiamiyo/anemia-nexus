@@ -96,6 +96,76 @@ export interface Coverage {
   resolved: number;
   unresolved: number;
   unmapped: number;
+  /** Volar-internal symbols/edges dropped by docs/04-architecture.md 4.1.2. */
+  filteredInternal: number;
+}
+
+export interface ComponentProp {
+  name: string;
+  typeText: string;
+  required: boolean;
+  resolved: boolean;
+  reason: string | null;
+}
+
+export interface ComponentEmit {
+  name: string;
+  payloadType: string;
+}
+
+export interface ComponentSlot {
+  name: string;
+  paramsType: string;
+  resolved: boolean;
+  reason: string | null;
+}
+
+export interface PropsCoverage {
+  resolved: number;
+  total: number;
+  unresolved: Array<{ name: string; typeText: string; reason: string }>;
+}
+
+export interface ComponentRecord {
+  symbolId: string;
+  name: string;
+  props: ComponentProp[];
+  emits: ComponentEmit[];
+  slots: ComponentSlot[];
+  propsCoverage: PropsCoverage;
+  analysisEngine: string;
+  source: 'typed' | 'syntax' | 'none';
+}
+
+export interface VueFileMetaRecord {
+  path: string;
+  sourceHash: string;
+  projectorVersion: string;
+  languageCoreVersion: string;
+  generatedBytes: number;
+  generatedAt: string;
+  filteredInternal: number;
+  templateEdges: number;
+}
+
+export interface VueAnalysisSummary {
+  files: number;
+  projected: number;
+  failed: number;
+  symbols: number;
+  mappedSymbols: number;
+  unmappedSymbols: number;
+  filteredInternal: number;
+  components: number;
+  propsCoverage: PropsCoverage;
+  templateEdges: {
+    total: number;
+    certain: number;
+    heuristic: number;
+    dynamicUnresolved: number;
+  };
+  unmappedReasons: Record<string, number>;
+  errors: string[];
 }
 
 export interface Counts {
@@ -135,6 +205,7 @@ export const EMPTY_COVERAGE: Coverage = {
   resolved: 0,
   unresolved: 0,
   unmapped: 0,
+  filteredInternal: 0,
 };
 
 export const EMPTY_COUNTS: Counts = {

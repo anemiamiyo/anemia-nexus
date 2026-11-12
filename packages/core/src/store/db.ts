@@ -3,7 +3,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { nexusError } from '../errors.js';
-import { DDL_V1, REQUIRED_INDEXES, SCHEMA_VERSION } from './schema.js';
+import { DDL_CURRENT, REQUIRED_INDEXES, SCHEMA_VERSION } from './schema.js';
 
 export interface SqliteProbe {
   ok: boolean;
@@ -64,7 +64,7 @@ export function ensureSchema(dbPath: string): { db: DatabaseSync; sqliteVersion:
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = openDatabase(dbPath);
   try {
-    db.exec(DDL_V1);
+    db.exec(DDL_CURRENT);
     const current = readSchemaVersion(db);
     if (current === null) {
       db.prepare('insert into meta(key, value) values (?, ?)').run(

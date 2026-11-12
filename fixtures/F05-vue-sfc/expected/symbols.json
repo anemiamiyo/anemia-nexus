@@ -1,0 +1,21 @@
+{
+  "src/App.vue": [
+    "ChildCard",
+    "EdgeCase",
+    "Formatter",
+    "ListPanel",
+    "UnresolvedProps",
+    "count",
+    "formatter",
+    "handleSelect",
+    "increment",
+    "key",
+    "payload",
+    "title",
+    "useCounter"
+  ],
+  "src/components/ChildCard.vue": ["CardProps", "Formatter", "emit", "fire", "props"],
+  "src/components/EdgeCase.vue": ["message", "version"],
+  "src/components/ListPanel.vue": [],
+  "src/components/UnresolvedProps.vue": ["Deep", "WeirdProps"]
+}

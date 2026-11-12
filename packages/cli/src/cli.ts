@@ -10,6 +10,7 @@ import {
   loadConfig,
   runDoctor,
   runInit,
+  dumpVueMap,
   queryReferences,
   querySearch,
   querySymbol,
@@ -132,6 +133,7 @@ function emptyCoverage(): Coverage {
     resolved: 0,
     unresolved: 0,
     unmapped: 0,
+    filteredInternal: 0,
   };
 }
 
@@ -335,6 +337,7 @@ export function buildProgram(): Command {
         coverage.resolved += root.coverage.resolved;
         coverage.unresolved += root.coverage.unresolved;
         coverage.unmapped += root.coverage.unmapped;
+        coverage.filteredInternal += root.coverage.filteredInternal ?? 0;
         symbols += root.symbols;
         certain += root.coverage.resolved;
         unresolved += root.coverage.unresolved;
@@ -372,7 +375,7 @@ export function buildProgram(): Command {
       .command('status')
       .description('index state, coverage, capabilities (never fails)')
       .helpGroup('Lifecycle')
-      .option('--json-schema', 'print the status output schema (not provided in Phase 01)'),
+      .option('--json-schema', 'print the status output schema (not provided)'),
     ['nex status', 'nex status --format json'],
   );
   status.action(async (_options, command: Command) => {
@@ -423,7 +426,7 @@ export function buildProgram(): Command {
       .helpGroup('Lifecycle')
       .option('--schema', 'print the configuration JSON Schema')
       .option('--mcp', 'MCP diagnostics (not provided)')
-      .option('--dump-vue-map <file>', 'Vue projection diagnostics (not provided)')
+      .option('--dump-vue-map <file>', 'print the Vue projection and offset mapping')
       .option('--repair', 'repair Nexus data (not provided)'),
     ['nex doctor', 'nex doctor --schema'],
   );
@@ -436,11 +439,13 @@ export function buildProgram(): Command {
           suggestion: 'Use `nex status` for indexing state.',
         });
       }
-      if (opts.dumpVueMap !== undefined) {
-        throw nexusError('E24', 'doctor --dump-vue-map is not provided in Phase 01', {
-          reason: 'Vue projection is Phase 02',
-          suggestion: 'Remove the flag.',
+      if (typeof opts.dumpVueMap === 'string') {
+        const dump = dumpVueMap({
+          projectRoot: context.projectRoot,
+          file: opts.dumpVueMap,
         });
+        writeStdout(JSON.stringify(dump, null, 2));
+        return { data: {}, exitCode: 0, skipRender: true };
       }
       if (opts.repair === true) {
         throw nexusError('E24', 'doctor --repair is not provided in Phase 01', {
@@ -531,7 +536,7 @@ export function buildProgram(): Command {
       .command('references <identifier>')
       .description('complete reference set for one symbol')
       .helpGroup('Query')
-      .option('--no-template', 'exclude template edges (Vue is not indexed in Phase 01)')
+      .option('--no-template', 'exclude Vue template edges')
       .option('--depth <n>', 'relation depth')
       .option('--include-heuristic', 'include heuristic edges'),
     ['nex references useButton', 'nex references s_7f3k9m2q1x8b4c6d --format json'],
@@ -549,6 +554,7 @@ export function buildProgram(): Command {
         },
         identifier,
         opts.includeHeuristic === true,
+        opts.template !== false,
       );
       return {
         data: {
