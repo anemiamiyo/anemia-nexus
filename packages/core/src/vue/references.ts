@@ -17,6 +17,7 @@ import {
   templateRangeAt,
   type VueProjection,
 } from './project.js';
+import { collectTemplateFallbackEdges } from './template-fallback.js';
 
 export interface VueTemplateEdgeStats {
   total: number;
@@ -105,6 +106,22 @@ function vueDescriptorName(symbol: string): string {
   const descriptor = scipDescriptorName(symbol);
   const colon = descriptor.lastIndexOf(':');
   return colon === -1 ? descriptor : descriptor.slice(colon + 1);
+}
+
+/**
+ * Extracts the owner chain (`Formatter.save`) from a SCIP descriptor. SCIP emits
+ * the descriptor after the last document-path segment, e.g.
+ * `.../src/`types.ts`/Formatter#save().` -> `Formatter.save`.
+ */
+function scipMemberChain(symbol: string): string {
+  const descriptor = symbol
+    .slice(symbol.lastIndexOf('/') + 1)
+    .replace(/\(\)\.$/, '')
+    .replace(/[.#:]$/, '');
+  return descriptor
+    .split(/[#.]/)
+    .filter((part) => part.length > 0)
+    .join('.');
 }
 
 function memberExpressionBefore(source: string, offset: number): boolean {
@@ -306,6 +323,8 @@ export function mapVueSymbolsAndReferences(options: MapVueSymbolsOptions): VueMa
 
   const declarationsByPath = new Map<string, VueDeclaration[]>();
   const propMemberByPath = new Map<string, Map<string, string>>();
+  const propRequiredByPath = new Map<string, Map<string, boolean>>();
+  const propTypeByPath = new Map<string, Map<string, string>>();
   for (const [symbolId, declaration] of declarationsBySymbolId) {
     const list = declarationsByPath.get(declaration.path) ?? [];
     list.push(declaration);
@@ -321,8 +340,13 @@ export function mapVueSymbolsAndReferences(options: MapVueSymbolsOptions): VueMa
   for (const componentDraft of options.components) {
     const members =
       propMemberByPath.get(componentDraft.declaration.path) ?? new Map<string, string>();
+    const required =
+      propRequiredByPath.get(componentDraft.declaration.path) ?? new Map<string, boolean>();
+    const types = propTypeByPath.get(componentDraft.declaration.path) ?? new Map<string, string>();
     const candidates = declarationsByPath.get(componentDraft.declaration.path) ?? [];
     for (const prop of componentDraft.props) {
+      required.set(prop.name, prop.required);
+      types.set(prop.name, prop.typeText);
       if (members.has(prop.name)) continue;
       const match = candidates.find(
         (declaration) =>
@@ -336,9 +360,32 @@ export function mapVueSymbolsAndReferences(options: MapVueSymbolsOptions): VueMa
       }
     }
     propMemberByPath.set(componentDraft.declaration.path, members);
+    propRequiredByPath.set(componentDraft.declaration.path, required);
+    propTypeByPath.set(componentDraft.declaration.path, types);
   }
   for (const list of declarationsByPath.values()) {
     list.sort((left, right) => left.startOffset - right.startOffset);
+  }
+
+  // `<Type>.<member>` targets used by the template fallback. A chain declared in
+  // more than one file is ambiguous and is left out rather than guessed.
+  const memberTargets = new Map<string, string>();
+  const ambiguousMemberChains = new Set<string>();
+  const addMemberTarget = (chain: string, symbolId: string): void => {
+    if (!chain.includes('.') || chain.startsWith('__VLS_')) return;
+    if (ambiguousMemberChains.has(chain)) return;
+    const previous = memberTargets.get(chain);
+    if (previous === undefined) memberTargets.set(chain, symbolId);
+    else if (previous !== symbolId) {
+      memberTargets.delete(chain);
+      ambiguousMemberChains.add(chain);
+    }
+  };
+  for (const [symbolId, declaration] of declarationsBySymbolId) {
+    addMemberTarget(declaration.nameChain, symbolId);
+  }
+  for (const [symbol, symbolId] of options.tsScipSymbolToSymbolId) {
+    addMemberTarget(scipMemberChain(symbol), symbolId);
   }
 
   function identifierAt(projection: VueProjection, offset: number): string {
@@ -348,6 +395,7 @@ export function mapVueSymbolsAndReferences(options: MapVueSymbolsOptions): VueMa
 
   const references: ReferenceRecord[] = [];
   const seen = new Set<string>();
+  const coveredTemplatePositions = new Set<string>();
   let filteredInternal = 0;
   let externalReferences = 0;
   let localOrUnmappedReferences = 0;
@@ -435,6 +483,7 @@ export function mapVueSymbolsAndReferences(options: MapVueSymbolsOptions): VueMa
         const dedupeKey = `${projection.path}\\u0000${position.line}\\u0000${position.col}\\u0000${symbolId}\\u0000${edge.role}`;
         if (seen.has(dedupeKey)) continue;
         seen.add(dedupeKey);
+        coveredTemplatePositions.add(`${position.line}:${position.col}`);
         references.push({
           targetSymbolId: symbolId,
           targetScipSymbol: null,
@@ -478,6 +527,53 @@ export function mapVueSymbolsAndReferences(options: MapVueSymbolsOptions): VueMa
         unresolvedReason: null,
         buildId: options.buildId,
       });
+    }
+  }
+
+  // Last resort for template member expressions / props whose SCIP occurrence
+  // was missing or unmappable. Covered positions are skipped, so a healthy
+  // SCIP stream keeps the edge set byte-for-byte unchanged.
+  for (const projection of options.projections) {
+    const declarations = declarationsByPath.get(projection.path) ?? [];
+    const componentSymbolId = componentSymbolByPath.get(projection.path) ?? null;
+    const fallbackEdges = collectTemplateFallbackEdges({
+      projection,
+      declarations,
+      declarationSymbolId,
+      propMembers: propMemberByPath.get(projection.path) ?? new Map<string, string>(),
+      propRequired: propRequiredByPath.get(projection.path) ?? new Map<string, boolean>(),
+      propTypes: propTypeByPath.get(projection.path) ?? new Map<string, string>(),
+      memberTargets,
+      coveredPositions: coveredTemplatePositions,
+    });
+    for (const fallback of fallbackEdges) {
+      const position = offsetToPosition(projection.sourceLineStarts, fallback.sourceOffset);
+      const positionKey = `${position.line}:${position.col}`;
+      if (coveredTemplatePositions.has(positionKey)) continue;
+      const dedupeKey = `${projection.path}|${position.line}|${position.col}|${fallback.targetSymbolId}|${fallback.role}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      coveredTemplatePositions.add(positionKey);
+      references.push({
+        targetSymbolId: fallback.targetSymbolId,
+        targetScipSymbol: null,
+        sourceSymbolId: componentSymbolId,
+        sourceFile: projection.path,
+        kind: 'read',
+        role: fallback.role,
+        relationClass: fallback.relationClass,
+        confidence: fallback.relationClass === 'certain' ? 'typed' : 'heuristic',
+        analysisEngine: 'vue-language-core',
+        line: position.line,
+        col: position.col,
+        unresolvedReason: null,
+        buildId: options.buildId,
+      });
+      templateEdges.total += 1;
+      if (fallback.relationClass === 'certain') templateEdges.certain += 1;
+      else templateEdges.heuristic += 1;
+      const entry = perFile.get(projection.path);
+      if (entry !== undefined) entry.templateEdges += 1;
     }
   }
 
