@@ -26,6 +26,16 @@ export const budgetsSchema = z.strictObject({
   maxFiles: z.number().int().positive().default(200),
 });
 
+/**
+ * Global Resource Coordinator limits (docs/05-data-model.md 5.10.3).
+ * `maxMemoryMB` is the global build budget; `concurrency` is an upper bound,
+ * further capped by memory, CPU and root count.
+ */
+export const resourcesSchema = z.strictObject({
+  maxMemoryMB: z.number().int().positive().max(32768).default(900),
+  concurrency: z.number().int().positive().max(32).default(1),
+});
+
 export const outputSchema = z.strictObject({
   format: z.enum(['auto', 'pretty', 'lines', 'json', 'markdown']).default('auto'),
   color: z.enum(['auto', 'always', 'never']).default('auto'),
@@ -36,6 +46,7 @@ export const outputSchema = z.strictObject({
 export const defaultsSchema = z.strictObject({
   ignore: ignoreSchema.default(() => ignoreSchema.parse({})),
   budgets: budgetsSchema.default(() => budgetsSchema.parse({})),
+  resources: resourcesSchema.default(() => resourcesSchema.parse({})),
   output: outputSchema.default(() => outputSchema.parse({})),
 });
 
@@ -69,6 +80,7 @@ export const surfaceSchema = z.strictObject({
 export const rootOverrideSchema = z.strictObject({
   ignore: ignoreSchema.partial().optional(),
   budgets: budgetsSchema.partial().optional(),
+  resources: resourcesSchema.partial().optional(),
   output: outputSchema.partial().optional(),
   include: z.array(safeRelativePattern).optional(),
   surface: surfaceSchema.partial().optional(),
@@ -139,6 +151,7 @@ export const configSchema = z.strictObject({
 export type NexusConfig = z.infer<typeof configSchema>;
 export type IgnoreConfig = z.infer<typeof ignoreSchema>;
 export type BudgetsConfig = z.infer<typeof budgetsSchema>;
+export type ResourcesConfig = z.infer<typeof resourcesSchema>;
 export type OutputConfig = z.infer<typeof outputSchema>;
 export type SurfaceConfig = z.infer<typeof surfaceSchema>;
 export type SurfaceManualConfig = z.infer<typeof surfaceManualSchema>;

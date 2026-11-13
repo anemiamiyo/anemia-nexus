@@ -9,7 +9,13 @@ import { nexusError, mapUnknownError } from '../errors.js';
 import { isInside, relativePosix } from '../util/paths.js';
 import { discoverRoots, type RootCandidate } from '../discovery/roots.js';
 import { IgnoreMatcher } from '../discovery/ignore.js';
-import { scanFiles, filesHash, type ScanResult } from '../discovery/scan.js';
+import {
+  scanFiles,
+  filesHash,
+  statHash,
+  type ScanResult,
+  type ScannedFile,
+} from '../discovery/scan.js';
 import { readTsconfig } from '../discovery/tsconfig.js';
 import { ANALYZER_VERSION, VUE_LANGUAGE_CORE_VERSION, VUE_PROJECTOR_VERSION } from './analyzer.js';
 import { collectDeclarations, createSyntaxProgram } from './declarations.js';
@@ -55,6 +61,28 @@ import {
   type RootManifest,
 } from '../store/manifest.js';
 import { withRootLock } from '../store/lock.js';
+import { crashPoint } from '../store/inject.js';
+import { beginIndexing, endIndexing, updateIndexingPhase } from '../store/state.js';
+import { recoverWorkspace } from '../store/recovery.js';
+import {
+  buildWorkspaceSnapshot,
+  reconcileWorkspace,
+  writeWorkspaceAtomic,
+} from '../store/workspace.js';
+import {
+  GlobalResourceCoordinator,
+  computeResourceBudget,
+  computeRootWeights,
+  orderRootsByDependencies,
+  type DegradationFlags,
+} from '../scheduler.js';
+import {
+  computeTsconfigHash,
+  planRootChange,
+  tsconfigStat,
+  type RootChangePlan,
+} from './invalidation.js';
+import { headCommit } from '../audit/git.js';
 import { projectVueFile, type VueProjection } from '../vue/project.js';
 import {
   collectVueSymbols,
@@ -104,12 +132,29 @@ export interface RootBuildResult {
   coverage: RootManifest['coverage'] | null;
   vue?: VueAnalysisSummary;
   degraded: string[];
+  /** Phase 06 */
+  mode?: 'fresh' | 'incremental' | 'full';
+  skipped?: boolean;
+  changed?: RootManifest['changed'];
+  peakRssMB?: number;
+  degradedStages?: string[];
+  invalidatedFiles?: string[];
 }
 
 export interface BuildResult {
   roots: RootBuildResult[];
   failedRoots: string[];
   totalMs: number;
+  resources?: {
+    budgetMB: number;
+    concurrency: number;
+    peakRssMBGlobal: number;
+    degradedStages: string[];
+  };
+  recovery?: {
+    repaired: string[];
+    invalid: string[];
+  };
 }
 
 export interface BuildOptions {
@@ -119,6 +164,25 @@ export interface BuildOptions {
   serial?: boolean;
   /** All selected roots; used only for declared-package boundary resolution. */
   workspaceRoots?: readonly WorkspaceRootInfo[];
+  /** Phase 06: `update` skips fresh roots and classifies each root first. */
+  mode?: 'build' | 'update';
+  /** Only build these roots (already validated against discovery). */
+  selectedRootIds?: readonly string[];
+  /** `--rebuild-affected`: force a full rebuild for every changed root. */
+  forceFull?: boolean;
+  /** `--files <glob>`: treat matching files as changed. */
+  forcedGlobs?: readonly string[];
+  /** `--budget-mb`: per-root budget hint (capped by the global budget). */
+  budgetMB?: number;
+  /** Cancellation (docs/05-data-model.md 5.10.3). */
+  signal?: AbortSignal;
+  /** Coordinator snapshot for the manifest (set by buildWorkspace). */
+  resourceInfo?: {
+    budgetMB: number;
+    concurrency: number;
+    peakRssMBGlobal: number;
+    degradedStages: string[];
+  };
 }
 
 interface RootAnalysis {
@@ -490,6 +554,7 @@ async function analyzeRoot(
   options: BuildOptions,
   tmpToken: string,
   startedAt: string,
+  flags: DegradationFlags,
 ): Promise<RootAnalysis> {
   const rootAbs = root.absolutePath;
   const ignore = new IgnoreMatcher(effective.ignore);
@@ -511,6 +576,12 @@ async function analyzeRoot(
   const scanMs = Date.now() - scanStarted;
   if (scan.filesFailed.length > 0) degraded.push('files-failed');
   if (scan.filesSkippedBySize > 0) degraded.push('files-skipped-by-size');
+  if (options.signal?.aborted) {
+    throw nexusError('E20', 'build cancelled', {
+      reason: 'abort signal received after scan',
+      suggestion: 'Re-run update; the previous committed index is untouched.',
+    });
+  }
   const tsFiles = scan.files.filter((file) => file.language !== 'vue');
   const vueFiles = scan.files.filter((file) => file.language === 'vue');
   emit(options, {
@@ -658,6 +729,12 @@ async function analyzeRoot(
     });
   }
   const vueMs = Math.max(Date.now() - vueStarted - scipMs, 0);
+  if (options.signal?.aborted) {
+    throw nexusError('E20', 'build cancelled', {
+      reason: 'abort signal received after semantic analysis',
+      suggestion: 'Re-run update; the previous committed index is untouched.',
+    });
+  }
 
   const previous = toPreviousIdentities(
     readPreviousIdentities(databasePath(options.projectRoot, root.rootId)),
@@ -733,6 +810,7 @@ async function analyzeRoot(
       filesFailed: scan.filesFailed.map((entry) => entry.path),
       unmappedSymbols: mapping.stats.unmapped,
     },
+    skipCalls: flags.disableCalls,
   });
   const graphMs = Date.now() - graphStarted;
   if (graph.warnings.length > 0) degraded.push('architecture-warnings');
@@ -858,6 +936,10 @@ interface BuildRootOutcome {
   coverage: RootManifest['coverage'];
   vue: VueAnalysisSummary;
   degraded: string[];
+  peakRssMB: number;
+  mode: 'full' | 'incremental';
+  changed: RootManifest['changed'];
+  invalidatedFiles: string[];
 }
 
 function coverageOf(analysis: RootAnalysis): RootManifest['coverage'] {
@@ -913,26 +995,48 @@ async function buildRoot(input: {
   sqliteVersion: string;
   rootSetHash: string;
   startedAt: string;
+  mode: 'full' | 'incremental';
+  changePlan: RootChangePlan | null;
+  flags: DegradationFlags;
+  gitCommit: string | null;
 }): Promise<BuildRootOutcome> {
-  const { root, options, sqliteVersion, rootSetHash, startedAt } = input;
+  const { root, options, sqliteVersion, rootSetHash, startedAt, mode, changePlan, flags } = input;
   const projectRoot = options.projectRoot;
   recoverPending(databasePath(projectRoot, root.rootId));
+  beginIndexing(projectRoot, root.rootId, 'scan');
   const sampler = memorySampler();
   const totalStarted = Date.now();
   const tmpToken = `${root.rootId}-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
   try {
-    const analysis = await analyzeRoot(root, input.effective, options, tmpToken, startedAt);
+    if (options.signal?.aborted) {
+      throw nexusError('E20', 'build cancelled', {
+        reason: 'abort signal received before analysis',
+        suggestion: 'Re-run update when the interruption is over; the previous index is intact.',
+      });
+    }
+    updateIndexingPhase(projectRoot, root.rootId, 'analyze');
+    const analysis = await analyzeRoot(root, input.effective, options, tmpToken, startedAt, flags);
+    updateIndexingPhase(projectRoot, root.rootId, 'write');
     const degraded = [...new Set(analysis.degraded)].sort();
+    if (flags.disableCalls) degraded.push('calls-off');
+    if (flags.chunked) degraded.push('chunked');
+    if (flags.reduceVueProjection) degraded.push('vue-projection-reduced');
+    const sortedDegraded = [...new Set(degraded)].sort();
+    const tsconfigHash = computeTsconfigHash(
+      root.absolutePath,
+      root.tsconfigRelativePath ?? `${root.rootPath}/tsconfig.json`,
+    );
     const fields: BuildFingerprintFields = {
       filesHash: filesHash(analysis.scan.files),
       configHash: input.effective.configHash,
+      tsconfigHash,
       schemaVersion: SCHEMA_VERSION,
       analyzerVersion: ANALYZER_VERSION,
       rootSetHash,
       nodeVersion: process.versions.node,
       sqliteVersion,
       platform: platformId(),
-      degraded,
+      degraded: sortedDegraded,
     };
     const buildFingerprint = computeBuildFingerprint(fields);
     const buildId = `b_${buildFingerprint.slice(3, 11)}_${Date.now().toString(36)}_${randomBytes(3).toString('hex')}`;
@@ -972,7 +1076,7 @@ async function buildRoot(input: {
       buildFingerprint,
       warnings: [...analysis.surface.warnings],
     };
-    writeSurface(projectRoot, surface);
+    crashPoint('after-flip-before-manifest');
     const writeMs = Date.now() - writeStarted;
     const builtAt = new Date().toISOString();
     const sizes = dbSizes(databasePath(projectRoot, root.rootId));
@@ -998,6 +1102,10 @@ async function buildRoot(input: {
       buildFingerprint,
       filesHash: fields.filesHash,
       configHash: input.effective.configHash,
+      tsconfigHash,
+      tsconfigMtimeMs: tsconfigStat(root.absolutePath).mtimeMs,
+      tsconfigSize: tsconfigStat(root.absolutePath).size,
+      statHash: statHash(analysis.scan.files),
       rootSetHash,
       ignoreHash: input.effective.ignoreHash,
       analyzerVersion: ANALYZER_VERSION,
@@ -1059,9 +1167,9 @@ async function buildRoot(input: {
       walBytes: sizes.walBytes,
       surfaceHash: surface.surfaceHash,
       surfaceEntries: surface.entries.length,
-      degraded,
+      degraded: sortedDegraded,
       warnings: [
-        ...degraded.map((entry) => ({
+        ...sortedDegraded.map((entry) => ({
           code: entry === 'syntax-only' ? 'E03' : entry.startsWith('vue') ? 'E11' : 'E11',
           message: `degraded: ${entry}`,
           severity: 'warning' as const,
@@ -1073,12 +1181,32 @@ async function buildRoot(input: {
         })),
       ],
       configLoads: configLoads(projectRoot, options.loadedConfig),
+      gitCommit: input.gitCommit,
+      mode,
+      changed:
+        changePlan === null
+          ? undefined
+          : {
+              ...changePlan.counts,
+              reasons: changePlan.reasons,
+              files: changePlan.files.slice(0, 50).map((entry) => entry.path),
+            },
+      invalidatedFiles: changePlan?.invalidatedFiles.slice(0, 200) ?? [],
+      lastIntegrityCheck:
+        readManifest(manifestPath(projectRoot, root.rootId)).manifest?.lastIntegrityCheck ?? null,
+      recoveryEvents:
+        readManifest(manifestPath(projectRoot, root.rootId)).manifest?.recoveryEvents ?? [],
+      recovered: false,
+      resources: options.resourceInfo,
       builtAt,
       lastSuccessAt: builtAt,
       lastFailureAt: null,
       lastFailureCode: null,
     };
     writeManifestAtomic(manifestPath(projectRoot, root.rootId), manifest);
+    crashPoint('after-manifest-before-surface');
+    writeSurface(projectRoot, surface);
+    crashPoint('after-surface-before-workspace');
     fs.rmSync(path.join(projectRoot, '.nexus', 'tmp', tmpToken), { recursive: true, force: true });
     return {
       rootId: root.rootId,
@@ -1093,12 +1221,21 @@ async function buildRoot(input: {
       tests: committed.counts.tests,
       coverage,
       vue: analysis.vue,
-      degraded,
+      degraded: sortedDegraded,
+      peakRssMB,
+      mode,
+      changed:
+        changePlan === null
+          ? { added: 0, modified: 0, deleted: 0, renamed: 0, total: 0, reasons: ['full-build'] }
+          : { ...changePlan.counts, reasons: changePlan.reasons },
+      invalidatedFiles: changePlan?.invalidatedFiles ?? [],
     };
   } catch (error) {
     sampler.stop();
     fs.rmSync(path.join(projectRoot, '.nexus', 'tmp', tmpToken), { recursive: true, force: true });
     throw error;
+  } finally {
+    endIndexing(projectRoot, root.rootId);
   }
 }
 
@@ -1201,6 +1338,56 @@ function recordFailure(
   void startedAtMs;
 }
 
+function scanFilesForChange(
+  projectRoot: string,
+  root: RootCandidate,
+  effective: EffectiveRootConfig,
+): ScannedFile[] {
+  const tsconfig = readTsconfig(
+    root.absolutePath,
+    root.tsconfigRelativePath ?? `${root.rootPath}/tsconfig.json`,
+  );
+  const ignore = new IgnoreMatcher(effective.ignore);
+  return scanFiles({
+    projectRoot,
+    rootPath: root.absolutePath,
+    absoluteRoot: root.absolutePath,
+    ignore,
+    tsconfigFileNames: tsconfig.ok ? tsconfig.fileNames : undefined,
+  }).files;
+}
+
+function skippedResult(
+  root: RootCandidate,
+  manifest: RootManifest | null,
+  durationMs: number,
+): RootBuildResult {
+  return {
+    rootId: root.rootId,
+    ok: true,
+    buildId: manifest?.buildId ?? null,
+    buildFingerprint: manifest?.buildFingerprint ?? null,
+    files: manifest?.counts.files ?? 0,
+    symbols: manifest?.counts.symbols ?? 0,
+    references: manifest?.counts.references ?? 0,
+    dependencies: manifest?.counts.dependencies ?? 0,
+    calls: manifest?.counts.calls ?? 0,
+    tests: manifest?.counts.tests ?? 0,
+    durationMs,
+    errorCode: null,
+    errorMessage: null,
+    coverage: manifest?.coverage ?? null,
+    vue: manifest?.vue,
+    degraded: manifest?.degraded ?? [],
+    mode: 'fresh',
+    skipped: true,
+    changed: { added: 0, modified: 0, deleted: 0, renamed: 0, total: 0, reasons: [] },
+    peakRssMB: 0,
+    degradedStages: [],
+    invalidatedFiles: [],
+  };
+}
+
 export async function buildWorkspace(options: BuildOptions): Promise<BuildResult> {
   const config = options.loadedConfig.config;
   if (config === null) {
@@ -1210,6 +1397,12 @@ export async function buildWorkspace(options: BuildOptions): Promise<BuildResult
     });
   }
   const projectRoot = path.resolve(options.projectRoot);
+  const mode = options.mode ?? 'build';
+
+  // 12.3.3: recovery runs before any scan/write, and before queries (the query
+  // layer calls the same function).
+  const recovery = recoverWorkspace(projectRoot);
+
   const selected = config.workspaces.roots.length > 0 ? config.workspaces.roots : undefined;
   const discovery = discoverRoots({
     projectRoot,
@@ -1247,18 +1440,173 @@ export async function buildWorkspace(options: BuildOptions): Promise<BuildResult
   );
   const buildOptions: BuildOptions = { ...options, workspaceRoots };
 
+  let roots = [...discovery.roots];
+  if (options.selectedRootIds !== undefined && options.selectedRootIds.length > 0) {
+    const wanted = new Set(options.selectedRootIds);
+    roots = roots.filter((root) => wanted.has(root.rootId));
+    if (roots.length === 0) {
+      throw nexusError('E16', 'selected roots are not part of this workspace', {
+        reason: `none of ${[...wanted].join(', ')} is a known root`,
+        suggestion: 'Run `nex status` and pass --root/--roots with a known rootId.',
+      });
+    }
+  }
+  const effectiveByRoot = new Map(
+    discovery.roots.map((root, index) => [
+      root.rootId,
+      effectiveConfigs[index] as EffectiveRootConfig,
+    ]),
+  );
+
+  const initialManifests = new Map(
+    discovery.roots.map((root) => [
+      root.rootId,
+      readManifest(manifestPath(projectRoot, root.rootId)).manifest,
+    ]),
+  );
+  reconcileWorkspace({
+    projectRoot,
+    roots: discovery.roots,
+    effective: effectiveConfigs,
+    rootSetHash,
+    manifests: initialManifests,
+  });
+
+  // 5.10: budget, weights, dependency order and the degradation ladder.
+  const previousPeaks = new Map<string, number>();
+  for (const [rootId, manifest] of initialManifests) {
+    if (manifest !== null && manifest.memory.peakRssMB > 0) {
+      previousPeaks.set(rootId, manifest.memory.peakRssMB);
+    }
+  }
+  const resourceConfig = {
+    ...config.defaults.resources,
+    concurrency: options.serial === true ? 1 : config.defaults.resources.concurrency,
+  };
+  const previousPeakValues = [...previousPeaks.values()];
+  const estimatedPeakMB =
+    previousPeakValues.length === 0
+      ? undefined
+      : Math.round(
+          previousPeakValues.reduce((sum, value) => sum + value, 0) / previousPeakValues.length,
+        );
+  const budget = computeResourceBudget({
+    config: resourceConfig,
+    rootCount: roots.length,
+    estimatedPeakMB: options.budgetMB ?? estimatedPeakMB,
+  });
+  const weights = computeRootWeights({
+    roots,
+    previousPeakMB: previousPeaks,
+    globalBudgetMB: budget.globalBudgetMB,
+  });
+  const coordinator = new GlobalResourceCoordinator({
+    budget,
+    weights,
+    onEvent: (event) => {
+      emit(options, {
+        type: 'write',
+        rootId: '',
+        message: `degraded ${event.stage}: ${event.reason} (peak ${event.peakMB}MB / budget ${event.budgetMB}MB)`,
+      });
+    },
+  });
+  const ordered = orderRootsByDependencies(roots);
+  const gitCommit = headCommit(projectRoot);
+
   clearTmp(projectRoot);
   const startedAt = new Date().toISOString();
   const startedMs = Date.now();
   const sampler = memorySampler();
-  const results: RootBuildResult[] = [];
+  const resultsByRoot = new Map<string, RootBuildResult>();
+  let cancelled = false;
 
-  for (let index = 0; index < discovery.roots.length; index += 1) {
-    const root = discovery.roots[index] as RootCandidate;
-    const effective = effectiveConfigs[index] as EffectiveRootConfig;
+  for (const root of ordered) {
+    const effective = effectiveByRoot.get(root.rootId) as EffectiveRootConfig;
     const rootStarted = Date.now();
+    if (options.signal?.aborted) {
+      cancelled = true;
+      resultsByRoot.set(root.rootId, {
+        rootId: root.rootId,
+        ok: false,
+        buildId: null,
+        buildFingerprint: null,
+        files: 0,
+        symbols: 0,
+        references: 0,
+        durationMs: 0,
+        errorCode: 'E20',
+        errorMessage: 'build cancelled',
+        coverage: null,
+        degraded: [],
+        mode: 'full',
+        peakRssMB: 0,
+        degradedStages: [],
+        invalidatedFiles: [],
+      });
+      continue;
+    }
     emit(options, { type: 'root-start', rootId: root.rootId, message: root.rootPath });
+
+    let plan: RootChangePlan | null = null;
+    if (mode === 'update') {
+      const currentFiles = scanFilesForChange(projectRoot, root, effective);
+      plan = planRootChange(
+        {
+          rootId: root.rootId,
+          previousManifest: initialManifests.get(root.rootId) ?? null,
+          currentFiles,
+          currentConfigHash: effective.configHash,
+          currentTsconfigHash: computeTsconfigHash(
+            root.absolutePath,
+            root.tsconfigRelativePath ?? `${root.rootPath}/tsconfig.json`,
+          ),
+          currentIgnoreHash: effective.ignoreHash,
+          currentRootSetHash: rootSetHash,
+          forceFull: options.forceFull === true,
+          forcedGlobs: options.forcedGlobs,
+        },
+        projectRoot,
+      );
+      if (plan.mode === 'fresh') {
+        resultsByRoot.set(
+          root.rootId,
+          skippedResult(root, initialManifests.get(root.rootId) ?? null, Date.now() - rootStarted),
+        );
+        emit(options, {
+          type: 'root-done',
+          rootId: root.rootId,
+          message: 'fresh (no changes)',
+        });
+        continue;
+      }
+    }
+
+    const flags = coordinator.flags();
+    if (flags.abort) {
+      resultsByRoot.set(root.rootId, {
+        rootId: root.rootId,
+        ok: false,
+        buildId: null,
+        buildFingerprint: null,
+        files: 0,
+        symbols: 0,
+        references: 0,
+        durationMs: Date.now() - rootStarted,
+        errorCode: 'E20',
+        errorMessage: 'aborted by resource coordinator',
+        coverage: null,
+        degraded: coordinator.currentStages(),
+        mode: plan?.mode === 'full' ? 'full' : 'incremental',
+        peakRssMB: 0,
+        degradedStages: coordinator.currentStages(),
+        invalidatedFiles: plan?.invalidatedFiles ?? [],
+      });
+      continue;
+    }
+
     try {
+      buildOptions.resourceInfo = coordinator.resourceSummary();
       const outcome = await withRootLock(rootDirectory(projectRoot, root.rootId), async () =>
         buildRoot({
           root,
@@ -1267,23 +1615,29 @@ export async function buildWorkspace(options: BuildOptions): Promise<BuildResult
           sqliteVersion: sqliteProbe.version,
           rootSetHash,
           startedAt,
+          mode: plan?.mode === 'full' ? 'full' : mode === 'update' ? 'incremental' : 'full',
+          changePlan: plan,
+          flags,
+          gitCommit,
         }),
       );
-      results.push({
+      const observed = coordinator.observePeak(root.rootId, outcome.peakRssMB);
+      resultsByRoot.set(root.rootId, {
         ...outcome,
         durationMs: Date.now() - rootStarted,
         errorCode: null,
         errorMessage: null,
+        degradedStages: coordinator.currentStages(),
       });
       emit(options, {
         type: 'root-done',
         rootId: root.rootId,
-        message: `${outcome.symbols} symbols, ${outcome.references} references`,
+        message: `${outcome.symbols} symbols, ${outcome.references} references${observed.degraded ? `; degraded ${observed.stage}` : ''}`,
       });
     } catch (error) {
       const nexus = mapUnknownError(error);
       recordFailure(projectRoot, root, nexus, rootStarted);
-      results.push({
+      resultsByRoot.set(root.rootId, {
         rootId: root.rootId,
         ok: false,
         buildId: null,
@@ -1295,27 +1649,58 @@ export async function buildWorkspace(options: BuildOptions): Promise<BuildResult
         errorCode: nexus.code,
         errorMessage: nexus.reason,
         coverage: null,
-        degraded: [],
+        degraded: coordinator.currentStages(),
+        mode: plan?.mode === 'full' ? 'full' : 'incremental',
+        peakRssMB: 0,
+        degradedStages: coordinator.currentStages(),
+        invalidatedFiles: plan?.invalidatedFiles ?? [],
       });
       emit(options, {
         type: 'root-failed',
         rootId: root.rootId,
         message: `${nexus.code}: ${nexus.reason}`,
       });
+      if (nexus.code === 'E20') cancelled = true;
     }
   }
 
-  const peakRssMB = sampler.stop();
+  const results = discovery.roots
+    .filter((root) => resultsByRoot.has(root.rootId))
+    .map((root) => resultsByRoot.get(root.rootId) as RootBuildResult);
+  // A root that was not selected is not part of this command's result set.
+  const finalPeakRssMB = sampler.stop();
   const totalMs = Date.now() - startedMs;
+
+  if (!cancelled) {
+    const finalManifests = new Map(
+      discovery.roots.map((root) => [
+        root.rootId,
+        readManifest(manifestPath(projectRoot, root.rootId)).manifest,
+      ]),
+    );
+    writeWorkspaceAtomic(projectRoot, {
+      ...buildWorkspaceSnapshot({
+        roots: discovery.roots,
+        effective: effectiveConfigs,
+        rootSetHash,
+        manifests: finalManifests,
+      }),
+      updatedAt: new Date().toISOString(),
+    });
+    crashPoint('workspace-before-cleanup');
+  }
+
   emit(options, {
     type: 'workspace-done',
     rootId: '',
-    message: `${results.filter((result) => result.ok).length}/${results.length} roots ok in ${totalMs}ms, peak RSS ${peakRssMB}MB`,
+    message: `${results.filter((result) => result.ok).length}/${results.length} roots ok in ${totalMs}ms, peak RSS ${finalPeakRssMB}MB`,
   });
   clearTmp(projectRoot);
   return {
     roots: results,
     failedRoots: results.filter((result) => !result.ok).map((result) => result.rootId),
     totalMs,
+    resources: coordinator.resourceSummary(),
+    recovery: { repaired: recovery.repaired, invalid: recovery.invalid },
   };
 }

@@ -7,11 +7,15 @@ import { loadConfig } from './config/load.js';
 import { resolveRootConfig } from './config/merge.js';
 import { IgnoreMatcher } from './discovery/ignore.js';
 import { discoverRoots } from './discovery/roots.js';
-import { scanFiles, filesHash } from './discovery/scan.js';
+import { scanFiles, filesHash, statHash } from './discovery/scan.js';
 import { readTsconfig } from './discovery/tsconfig.js';
 import { isInside } from './util/paths.js';
 import { readManifest, rootDirectory, type RootManifest } from './store/manifest.js';
 import { latestCommittedBuild, openDatabase } from './store/db.js';
+import { clearStaleIndexingMarker, deriveRootState, readIndexingMarker } from './store/state.js';
+import { computeTsconfigHash, tsconfigStat } from './index/invalidation.js';
+import { ANALYZER_VERSION } from './index/analyzer.js';
+import { readSurface } from './surface/store.js';
 
 export const CAPABILITIES = {
   styleDependency: 'file-level',
@@ -27,7 +31,10 @@ export const CAPABILITIES = {
   impactAnalysis: 'certain-with-blind-spots',
   auditOrchestration: 'cli-only',
   queryRootRouting: 'root|roots|all',
-  incremental: false,
+  incremental: 'root-level',
+  crashRecovery: 'matrix-12.3.3',
+  stateMachine: 'fresh|dirty|indexing|stale|failed',
+  scheduler: 'cooperative',
   mcpFormats: [] as string[],
   dynamicUnresolved: 'marked',
 } as const;
@@ -73,6 +80,7 @@ export interface RootStatus {
   lastSuccessAt: string | null;
   lastFailureAt: string | null;
   lastFailureCode: string | null;
+  lastIntegrityCheck: RootManifest['lastIntegrityCheck'] | null;
   error: string | null;
 }
 
@@ -130,6 +138,7 @@ function listManifestRoots(
   const output: Array<{ rootId: string; manifest: RootManifest | null; error: string | null }> = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
+    if (entry.name.endsWith('.lock')) continue;
     const read = readManifest(path.join(rootsDir, entry.name, 'manifest.json'));
     output.push({ rootId: entry.name, manifest: read.manifest, error: read.error });
   }
@@ -150,45 +159,92 @@ export function verifyFreshness(input: VerifyFreshnessInput): {
   reasons: string[];
 } {
   const { manifest, projectRoot } = input;
-  if (manifest.state === 'failed') return { staleness: 'failed', reasons: ['build-failed'] };
-  if (manifest.lastFailureAt !== null && manifest.lastFailureAt !== undefined) {
-    // A failure after the last success leaves the old index readable but stale.
-    if (manifest.lastFailureAt > manifest.lastSuccessAt) {
-      return {
-        staleness: 'stale',
-        reasons: [`last-failure:${manifest.lastFailureCode ?? manifest.lastFailureAt}`],
-      };
+  const config = input.loadedConfig?.config ?? null;
+  let currentConfigHash: string | null = null;
+  let currentTsconfigHash: string | null = null;
+  if (config !== null) {
+    try {
+      const effective = resolveRootConfig(config, manifest.rootId, config.roots[manifest.rootId]);
+      currentConfigHash = effective.configHash;
+      const rootAbs = path.resolve(projectRoot, manifest.rootPath);
+      const stat = tsconfigStat(rootAbs);
+      if (
+        manifest.tsconfigHash !== undefined &&
+        manifest.tsconfigHash !== '' &&
+        manifest.tsconfigMtimeMs === stat.mtimeMs &&
+        manifest.tsconfigSize === stat.size
+      ) {
+        currentTsconfigHash = manifest.tsconfigHash;
+      } else {
+        currentTsconfigHash = computeTsconfigHash(
+          rootAbs,
+          manifest.tsconfig ?? `${manifest.rootPath}/tsconfig.json`,
+        );
+      }
+    } catch {
+      currentConfigHash = null;
+      currentTsconfigHash = null;
     }
   }
-  const config = input.loadedConfig?.config ?? null;
-  if (config === null) return { staleness: manifest.staleness ?? 'fresh', reasons: [] };
-  const reasons: string[] = [];
-  const effective = resolveRootConfig(config, manifest.rootId, config.roots[manifest.rootId]);
-  if (manifest.configHash !== '' && manifest.configHash !== effective.configHash) {
-    reasons.push('config-changed');
-  }
-  if (typeof manifest.filesHash === 'string' && manifest.filesHash !== '') {
+  let currentFilesHash: string | null = null;
+  let scanFailed = false;
+  if (config !== null && typeof manifest.filesHash === 'string' && manifest.filesHash !== '') {
     try {
+      const effective = resolveRootConfig(config, manifest.rootId, config.roots[manifest.rootId]);
       const rootAbs = path.resolve(projectRoot, manifest.rootPath);
       const tsconfig = readTsconfig(
         rootAbs,
         manifest.tsconfig ?? `${manifest.rootPath}/tsconfig.json`,
       );
       const ignore = new IgnoreMatcher(effective.ignore);
-      const scan = scanFiles({
+      const scanOptions = {
         projectRoot,
         rootPath: rootAbs,
         absoluteRoot: rootAbs,
         ignore,
         tsconfigFileNames: tsconfig.ok ? tsconfig.fileNames : undefined,
-      });
-      if (filesHash(scan.files) !== manifest.filesHash) reasons.push('files-changed');
+      };
+      let changed = true;
+      if (manifest.statHash !== undefined && manifest.statHash !== '') {
+        // Fast path: stat-only probe. A match proves the file set/size/mtime is
+        // unchanged, so the content hash cannot have changed under normal use.
+        const quick = scanFiles({ ...scanOptions, statOnly: true });
+        if (statHash(quick.files) === manifest.statHash) {
+          changed = false;
+          currentFilesHash = manifest.filesHash;
+        }
+      }
+      if (changed) {
+        const scan = scanFiles(scanOptions);
+        currentFilesHash = filesHash(scan.files);
+      }
     } catch {
-      reasons.push('freshness-check-failed');
+      scanFailed = true;
     }
   }
-  if (reasons.length > 0) return { staleness: 'stale', reasons };
-  return { staleness: 'fresh', reasons: [] };
+  const surfaceMatchesManifest: boolean | null = (() => {
+    try {
+      return readSurface(projectRoot, manifest.rootId).matchesManifest;
+    } catch {
+      return null;
+    }
+  })();
+  clearStaleIndexingMarker(projectRoot, manifest.rootId);
+  const marker = readIndexingMarker(projectRoot, manifest.rootId);
+  const derivation = deriveRootState({
+    manifest,
+    manifestExists: true,
+    currentFilesHash,
+    currentConfigHash,
+    currentTsconfigHash,
+    currentAnalyzerVersion: ANALYZER_VERSION,
+    marker,
+    surfaceMatchesManifest,
+  });
+  if (scanFailed) {
+    return { staleness: 'stale', reasons: [...derivation.reasons, 'freshness-check-failed'] };
+  }
+  return { staleness: derivation.state, reasons: derivation.reasons };
 }
 
 export function findActiveRoot(
@@ -319,6 +375,7 @@ export async function statusReport(options: StatusOptions): Promise<StatusReport
         lastSuccessAt: null,
         lastFailureAt: null,
         lastFailureCode: null,
+        lastIntegrityCheck: null,
         error: entry.error,
       });
       warnings.push({
@@ -410,6 +467,7 @@ export async function statusReport(options: StatusOptions): Promise<StatusReport
       lastSuccessAt: manifest.lastSuccessAt ?? null,
       lastFailureAt: manifest.lastFailureAt ?? null,
       lastFailureCode: manifest.lastFailureCode ?? null,
+      lastIntegrityCheck: manifest.lastIntegrityCheck ?? null,
       error: dbMissing ? 'index.db missing' : dbCorrupt ? 'database unreadable' : null,
     });
   }
@@ -443,9 +501,13 @@ export async function statusReport(options: StatusOptions): Promise<StatusReport
   );
   const staleness: StatusReport['staleness'] = roots.some((root) => root.staleness === 'failed')
     ? 'failed'
-    : roots.some((root) => root.staleness !== 'fresh')
+    : roots.some((root) => root.staleness === 'stale')
       ? 'stale'
-      : 'fresh';
+      : roots.some((root) => root.staleness === 'dirty')
+        ? 'dirty'
+        : roots.some((root) => root.staleness === 'indexing')
+          ? 'indexing'
+          : 'fresh';
 
   const guidance: string[] =
     staleness === 'fresh'
@@ -454,7 +516,9 @@ export async function statusReport(options: StatusOptions): Promise<StatusReport
           'nex symbol <name>',
           'nex doctor',
         ]
-      : ['nex build', 'nex status', 'nex doctor'];
+      : staleness === 'dirty' || staleness === 'indexing'
+        ? ['nex update', 'nex status', 'nex doctor']
+        : ['nex update', 'nex build', 'nex doctor'];
 
   return {
     state: 'ready',

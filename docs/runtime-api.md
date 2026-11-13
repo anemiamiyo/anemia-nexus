@@ -25,7 +25,9 @@
 | `node:readline` `createInterface()` | TTY 下的 init / verify 交互确认（稳定 API，无实验标记） | 随 Node 提供 | **已验证：Phase 01 init；Phase 05 verify** | 11.6、18.4 |
 | `node:fs` `cpSync` | **仅测试夹具**复制；不进入产品运行路径 | 16.7.0（测试环境） | 已验证：Phase 01 测试 | 17.1 |
 | `node:child_process` `execFile`（`shell: false`） | `verify` 白名单命令执行；超时与 1 MB 输出上限 | 随 Node 提供 | **已验证：Phase 05 单测与 CLI** | 18.4 |
-| `node:child_process` `execFileSync` | 读取 git ref 形式的 API 基线（`git show <ref>:<path>`）与 Phase 05 postflight Git 读取 | 随 Node 提供 | **已验证：Phase 03/05 单测与 act** | 6.3、11.3、13.2 |
+| `node:child_process` `execFileSync` | 读取 git ref 形式的 API 基线（`git show <ref>:<path>`）与 Phase 05 postflight Git 读取；Phase 06 recovery event 与 HEAD 记录 | 随 Node 提供 | **已验证：Phase 03/05/06 单测与 act** | 6.3、11.3、13.2、5.11 |
+| `node:os` `freemem()` / `cpus()` | 5.10 全局资源协调器的可用内存与 CPU 核数探测 | 随 Node 提供 | **已验证：Phase 06 调度器单测与 F18** | 5.10.3 |
+| `process.kill(pid, 'SIGKILL')` | F16 崩溃注入（仅测试环境变量触发，产品默认不调用） | 随 Node 提供 | **已验证：Phase 06 F16 七注入点** | 17.2 #19、12.3.3 |
 
 ## 3. 维护规则
 

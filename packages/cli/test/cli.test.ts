@@ -250,10 +250,52 @@ describe('lifecycle commands', () => {
     }
   });
 
+  it('updates a changed root and reports a no-op on the second run', async () => {
+    const directory = makeProject('F01-reexport-chain', 'cli-update');
+    try {
+      const init = await runCli(
+        ['init', '--roots', 'all', '--write-config', '--yes', '--no-typecheck', '--format', 'json'],
+        directory,
+      );
+      expect(init.code).toBe(0);
+      const build = await runCli(['build', '--format', 'json'], directory);
+      expect(build.code).toBe(0);
+      fs.appendFileSync(
+        path.join(directory, 'src', 'consumer.ts'),
+        '\nexport const phase06Cli = true;\n',
+      );
+      const update = await runCli(['update', '--format', 'json'], directory);
+      expect(update.code).toBe(0);
+      const updatePayload = JSON.parse(update.stdout) as {
+        roots: Array<{ mode: string; changed?: { total: number } }>;
+        resources: { budgetMB: number; concurrency: number } | null;
+      };
+      expect(updatePayload.roots[0]?.mode).toBe('incremental');
+      expect(updatePayload.roots[0]?.changed?.total).toBe(1);
+      expect(updatePayload.resources?.budgetMB).toBeGreaterThan(0);
+      const second = await runCli(['update', '--format', 'json'], directory);
+      expect(second.code).toBe(0);
+      const secondPayload = JSON.parse(second.stdout) as {
+        roots: Array<{ mode: string; skipped?: boolean }>;
+      };
+      expect(secondPayload.roots[0]?.mode).toBe('fresh');
+      expect(secondPayload.roots[0]?.skipped).toBe(true);
+      const lines = await runCli(['update', '--format', 'lines'], directory);
+      expect(lines.code).toBe(0);
+      expect(lines.stdout).not.toContain('\u001b');
+      expect(lines.stdout).toContain('mode=fresh');
+      const markdown = await runCli(['update', '--format', 'markdown'], directory);
+      expect(markdown.code).toBe(0);
+      expect(markdown.stdout).toContain('## Roots');
+    } finally {
+      cleanup(directory);
+    }
+  });
+
   it('never returns fake success for unimplemented commands', async () => {
     const directory = makeEmptyProject('cli-stub');
     try {
-      for (const command of ['update', 'mcp', 'print', 'test']) {
+      for (const command of ['mcp', 'print', 'test']) {
         const result = await runCli([command, '--format', 'json'], directory);
         expect(result.code).toBe(1);
         expect(result.stdout).toContain('E24');

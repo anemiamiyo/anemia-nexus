@@ -81,6 +81,72 @@ export type {
   DependencyQueryResult,
 } from './query/service.js';
 export { openReadStore } from './store/read.js';
+export {
+  deriveRootState,
+  beginIndexing,
+  endIndexing,
+  readIndexingMarker,
+  clearStaleIndexingMarker,
+  isTransitionAllowed,
+  assertTransition,
+  STATE_TRANSITIONS,
+  STATE_NAMES,
+} from './store/state.js';
+export type {
+  IndexState,
+  IndexingMarker,
+  StateDerivationInput,
+  StateDerivation,
+} from './store/state.js';
+export { recoverRoot, recoverWorkspace } from './store/recovery.js';
+export type { RecoveryOutcome, RecoveryResult, WorkspaceRecoveryResult } from './store/recovery.js';
+export {
+  readWorkspace,
+  writeWorkspaceAtomic,
+  buildWorkspaceSnapshot,
+  reconcileWorkspace,
+} from './store/workspace.js';
+export type { WorkspaceSnapshot, WorkspaceRootEntry, WorkspaceCheck } from './store/workspace.js';
+export {
+  INVALIDATION_RULES,
+  classifyRootChanges,
+  planRootChange,
+  diffFileSets,
+  computeTsconfigHash,
+  computeInvalidatedClosure,
+  readCommittedFiles,
+  matchFileGlob,
+} from './index/invalidation.js';
+export type {
+  InvalidationRule,
+  FileChange,
+  FileChangeKind,
+  RootChangeInput,
+  RootChangePlan,
+} from './index/invalidation.js';
+export {
+  GlobalResourceCoordinator,
+  computeResourceBudget,
+  computeRootWeights,
+  orderRootsByDependencies,
+  DEGRADATION_LADDER,
+} from './scheduler.js';
+export type {
+  ResourceConfig,
+  ResourceBudget,
+  RootWeight,
+  DegradationFlags,
+  DegradationStage,
+} from './scheduler.js';
+export {
+  verifyIncrementalEquivalence,
+  compareRoot,
+  formatEquivalenceReport,
+  EQUIVALENCE_FIELDS,
+} from './index/equivalence.js';
+export type { EquivalenceResult, EquivalenceField, FieldComparison } from './index/equivalence.js';
+export { computeBuildFingerprint, computeRootSetHash, platformId } from './index/fingerprint.js';
+export { CRASH_POINTS } from './store/inject.js';
 export { resolveQueryScope } from './query/routing.js';
 export type { QueryScope, ScopeSelection, ScopeCandidate } from './query/routing.js';
 export { analyzeImpact, impactData } from './audit/impact.js';

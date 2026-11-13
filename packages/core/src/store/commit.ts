@@ -24,6 +24,7 @@ import {
   sqliteVersionOf,
 } from './db.js';
 import { SCHEMA_VERSION } from './schema.js';
+import { crashPoint } from './inject.js';
 
 export interface MappingRow {
   symbolId: string;
@@ -693,11 +694,13 @@ export class BuildWriter {
           suggestion: 'Check include/ignore rules and tsconfig file list.',
         });
       }
+      crashPoint('after-rows-before-commit');
       db.exec('COMMIT');
     } catch (error) {
       this.rollback();
       throw error;
     }
+    crashPoint('after-commit-before-flip');
     const sqliteVersion = sqliteVersionOf(db);
     db.close();
     this.closed = true;

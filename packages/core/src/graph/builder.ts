@@ -37,6 +37,8 @@ export interface GraphBuildInput {
     filesFailed: readonly string[];
     unmappedSymbols: number;
   };
+  /** Degradation level 1: keep references/dependencies, drop the call graph. */
+  skipCalls?: boolean;
 }
 
 export interface GraphBuildResult {
@@ -98,13 +100,20 @@ export function buildGraph(input: GraphBuildInput): GraphBuildResult {
     },
   );
 
-  const calls = extractCalls({
-    program: input.program,
-    checker: input.checker,
-    projectRoot: input.projectRoot,
-    rootAbs: input.rootAbs,
-    assignments: input.assignments,
-  });
+  const calls: CallExtractionResult =
+    input.skipCalls === true
+      ? {
+          calls: [],
+          byResolution: { direct: 0, typed: 0, heuristic: 0, unresolved: 0 },
+          unresolved: 0,
+        }
+      : extractCalls({
+          program: input.program,
+          checker: input.checker,
+          projectRoot: input.projectRoot,
+          rootAbs: input.rootAbs,
+          assignments: input.assignments,
+        });
 
   const symbolCountByPath = new Map<string, number>();
   for (const assignment of input.assignments) {

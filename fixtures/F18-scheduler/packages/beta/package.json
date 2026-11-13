@@ -1,0 +1,10 @@
+{
+  "name": "@f18/beta",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@f18/alpha": "0.0.0"
+  }
+}

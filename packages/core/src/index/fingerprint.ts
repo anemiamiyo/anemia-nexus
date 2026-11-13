@@ -7,6 +7,12 @@ export { SCHEMA_VERSION } from '../store/schema.js';
 export interface BuildFingerprintFields {
   filesHash: string;
   configHash: string;
+  /**
+   * Content hash of the root tsconfig (Phase 06). Path aliases, `include`,
+   * `references` and compiler options live here, so a tsconfig change must
+   * change the fingerprint (docs/12-indexing.md 12.1).
+   */
+  tsconfigHash: string;
   schemaVersion: number;
   analyzerVersion: typeof ANALYZER_VERSION;
   rootSetHash: string;
@@ -16,10 +22,15 @@ export interface BuildFingerprintFields {
   degraded: string[];
 }
 
+/**
+ * `buildFingerprint = "bf_" + base32(sha256(canonical input))[0..20]`
+ * (docs/05-data-model.md 5.11). `builtAt` and `gitCommit` are never inputs.
+ */
 export function computeBuildFingerprint(fields: BuildFingerprintFields): string {
   const canonical = stableStringify({
     filesHash: fields.filesHash,
     configHash: fields.configHash,
+    tsconfigHash: fields.tsconfigHash,
     schemaVersion: fields.schemaVersion,
     analyzerVersion: fields.analyzerVersion,
     rootSetHash: fields.rootSetHash,

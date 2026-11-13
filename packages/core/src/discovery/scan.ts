@@ -17,6 +17,8 @@ export interface ScannedFile {
   absolutePath: string;
   sourceHash: string;
   size: number;
+  /** Modification time used only for the cheap query-time freshness probe. */
+  mtimeMs?: number;
   language: FileLanguage;
   /** Architecture module from explicit config; null when unassigned. */
   ownerModule?: string | null;
@@ -48,6 +50,11 @@ export interface ScanOptions {
   /** Phase 04: discover `.css` / `.scss` / `.less` (default true). */
   scanStyles?: boolean;
   styleExtensions?: readonly string[];
+  /**
+   * Query-time freshness probe: stat only, never read file contents and never
+   * compute `sourceHash`. The full scan remains the authority for builds.
+   */
+  statOnly?: boolean;
 }
 
 export function fileLanguage(fileName: string): FileLanguage | null {
@@ -81,6 +88,7 @@ function readScannedFile(
   absolutePath: string,
   result: ScanResult,
   seen: Set<string>,
+  statOnly = false,
 ): void {
   const relativeToProject = toPosix(path.relative(projectRoot, absolutePath));
   if (!realpathInside(projectRoot, rootPath, absolutePath)) {
@@ -103,12 +111,13 @@ function readScannedFile(
     return;
   }
   try {
-    const text = fs.readFileSync(absolutePath, 'utf8');
+    const text = statOnly ? '' : fs.readFileSync(absolutePath, 'utf8');
     result.files.push({
       path: relativeToProject,
       absolutePath,
-      sourceHash: contentHash(text),
+      sourceHash: statOnly ? '' : contentHash(text),
       size: stat.size,
+      mtimeMs: stat.mtimeMs,
       language,
     });
   } catch {
@@ -193,7 +202,14 @@ function scanAuxFiles(
       }
       if (seen.has(childRelative)) continue;
       seen.add(childRelative);
-      readScannedFile(projectRootAbs, options.absoluteRoot, childAbsolute, result, seen);
+      readScannedFile(
+        projectRootAbs,
+        options.absoluteRoot,
+        childAbsolute,
+        result,
+        seen,
+        options.statOnly === true,
+      );
     }
   }
 }
@@ -240,7 +256,14 @@ export function scanFiles(options: ScanOptions): ScanResult {
       }
       if (seen.has(relative)) continue;
       seen.add(relative);
-      readScannedFile(projectRootAbs, absoluteRoot, absolutePath, result, seen);
+      readScannedFile(
+        projectRootAbs,
+        absoluteRoot,
+        absolutePath,
+        result,
+        seen,
+        options.statOnly === true,
+      );
     }
     if (scanVue || scanStyles) scanAuxFiles(options, projectRootAbs, result, seen);
   } else {
@@ -285,7 +308,14 @@ export function scanFiles(options: ScanOptions): ScanResult {
         }
         if (seen.has(childRelative)) continue;
         seen.add(childRelative);
-        readScannedFile(projectRootAbs, absoluteRoot, childAbsolute, result, seen);
+        readScannedFile(
+          projectRootAbs,
+          absoluteRoot,
+          childAbsolute,
+          result,
+          seen,
+          options.statOnly === true,
+        );
       }
     }
   }
@@ -299,5 +329,16 @@ export function scanFiles(options: ScanOptions): ScanResult {
 export function filesHash(files: readonly ScannedFile[]): string {
   // Sorted (relative path, sourceHash) pairs (docs/05-data-model.md 5.11).
   const canonical = files.map((file) => [file.path, file.sourceHash] as const);
+  return contentHash(JSON.stringify(canonical));
+}
+
+/**
+ * Cheap query-time freshness probe: `(path,size,mtimeMs)`. It is not a
+ * substitute for `filesHash`; a mismatch triggers the full content scan.
+ */
+export function statHash(files: readonly ScannedFile[]): string {
+  const canonical = files.map(
+    (file) => [file.path, file.size, Math.round(file.mtimeMs ?? 0)] as const,
+  );
   return contentHash(JSON.stringify(canonical));
 }

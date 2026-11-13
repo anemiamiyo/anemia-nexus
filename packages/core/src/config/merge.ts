@@ -6,6 +6,7 @@ import type {
   IgnoreConfig,
   NexusConfig,
   OutputConfig,
+  ResourcesConfig,
   RootOverride,
   SurfaceConfig,
 } from './schema.js';
@@ -14,6 +15,7 @@ export interface EffectiveRootConfig {
   rootId: string;
   ignore: IgnoreConfig;
   budgets: BudgetsConfig;
+  resources: ResourcesConfig;
   output: OutputConfig;
   style: NexusConfig['style'];
   architecture: NexusConfig['architecture'];
@@ -89,6 +91,10 @@ export function resolveRootConfig(
   const override = rootOverride ?? config.roots[rootId];
   const { ignore, sources } = mergeIgnore(config.defaults.ignore, override?.ignore);
   const budgets: BudgetsConfig = { ...config.defaults.budgets, ...(override?.budgets ?? {}) };
+  const resources: ResourcesConfig = {
+    ...config.defaults.resources,
+    ...(override?.resources ?? {}),
+  };
   const output: OutputConfig = { ...config.defaults.output, ...(override?.output ?? {}) };
   const surface: SurfaceConfig = {
     entries: override?.surface?.entries ?? config.surface.entries,
@@ -100,6 +106,7 @@ export function resolveRootConfig(
     rootId,
     ignore,
     budgets,
+    resources,
     output,
     style: config.style,
     architecture: config.architecture,
@@ -111,6 +118,7 @@ export function resolveRootConfig(
     rootId,
     ignore,
     budgets,
+    resources,
     output,
     style: config.style,
     architecture: config.architecture,

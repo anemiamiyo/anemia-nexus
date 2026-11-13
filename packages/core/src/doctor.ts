@@ -22,6 +22,10 @@ import {
 import { databasePath, manifestPath, readManifest, rootDirectory } from './store/manifest.js';
 import { readSurface } from './surface/store.js';
 import { SCHEMA_VERSION } from './store/schema.js';
+import { recoverWorkspace } from './store/recovery.js';
+import { isTransitionAllowed, readIndexingMarker } from './store/state.js';
+import { readWorkspace } from './store/workspace.js';
+import { computeRootSetHash } from './index/fingerprint.js';
 
 export type CheckStatus = 'pass' | 'warn' | 'fail';
 
@@ -194,6 +198,62 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
         ),
   );
 
+  // 12.3.3 startup recovery: DB is authoritative; manifest/surface are derived.
+  const recovery = recoverWorkspace(projectRoot);
+  if (recovery.invalid.length > 0) {
+    checks.push(
+      check(
+        'recovery',
+        'startup recovery (12.3.3)',
+        'fail',
+        `invalid roots: ${recovery.invalid.join(', ')}`,
+        {
+          suggestion: 'Delete the listed root index and rebuild; do not rescue corrupt data.',
+          evidence: { invalid: recovery.invalid },
+        },
+      ),
+    );
+  } else if (recovery.repaired.length > 0) {
+    checks.push(
+      check(
+        'recovery',
+        'startup recovery (12.3.3)',
+        'warn',
+        `repaired derived state for: ${recovery.repaired.join(', ')} (validate with nex update)`,
+        { evidence: { repaired: recovery.repaired } },
+      ),
+    );
+  } else {
+    checks.push(check('recovery', 'startup recovery (12.3.3)', 'pass', 'no interrupted commit'));
+  }
+
+  const workspace = readWorkspace(projectRoot).workspace;
+  if (workspace !== null && loaded?.config !== null && loaded?.config !== undefined) {
+    const expectedRootSetHash = computeRootSetHash(
+      workspace.roots.map((entry) => ({
+        rootId: entry.rootId,
+        rootPath: entry.rootPath,
+        packageName: entry.packageName,
+        configHash: resolveRootConfig(
+          loaded.config as NonNullable<typeof loaded.config>,
+          entry.rootId,
+          loaded.config?.roots[entry.rootId],
+        ).configHash,
+      })),
+    );
+    checks.push(
+      workspace.rootSetHash === expectedRootSetHash
+        ? check('workspace-hash', 'workspace rootSetHash', 'pass', 'matches configuration')
+        : check(
+            'workspace-hash',
+            'workspace rootSetHash',
+            'warn',
+            'workspace.json is stale; it is derived and will be rebuilt on the next build/update',
+            { suggestion: 'Run `nex update` or `nex build`.' },
+          ),
+    );
+  }
+
   const status = await statusReport({
     projectRoot,
     self: {
@@ -235,6 +295,46 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
           evidence: { buildId: manifest.buildId, filesHash: manifest.filesHash },
         },
       ),
+    );
+
+    // 12.4 state machine: only the documented transition set is legal.
+    const durableState =
+      manifest.staleness === 'indexing' || manifest.staleness === 'dirty'
+        ? 'stale'
+        : manifest.staleness;
+    const legal = isTransitionAllowed(durableState, root.staleness);
+    checks.push(
+      legal
+        ? check(
+            `state:${root.rootId}`,
+            `index state (${root.rootId})`,
+            'pass',
+            `${durableState} -> ${root.staleness}`,
+          )
+        : check(
+            `state:${root.rootId}`,
+            `index state (${root.rootId})`,
+            'fail',
+            `illegal transition ${durableState} -> ${root.staleness}`,
+            {
+              suggestion:
+                'This is an implementation defect (docs/12-indexing.md 12.4.2); report it, do not add transitions.',
+            },
+          ),
+    );
+    const marker = readIndexingMarker(projectRoot, root.rootId);
+    checks.push(
+      marker === null
+        ? check(`marker:${root.rootId}`, `indexing marker (${root.rootId})`, 'pass', 'none')
+        : check(
+            `marker:${root.rootId}`,
+            `indexing marker (${root.rootId})`,
+            root.staleness === 'indexing' ? 'pass' : 'warn',
+            `pid ${marker.pid}, phase ${marker.phase}`,
+            {
+              suggestion: 'A live build may be running; a dead marker is cleared by recovery.',
+            },
+          ),
     );
 
     const surfaceRead = readSurface(projectRoot, root.rootId);
@@ -451,11 +551,11 @@ function finish(
 }
 
 export function unsupportedDoctorFlag(flag: string): never {
-  throw nexusError('E24', `${flag} is not provided in Phase 01`, {
+  throw nexusError('E24', `${flag} is not provided in Phase 06`, {
     reason: 'this diagnostic capability belongs to a later phase',
     suggestion:
       flag === '--repair'
-        ? 'Phase 01 doctor is read-only; delete and rebuild the root index manually.'
+        ? 'Delete and rebuild the affected root index; full `doctor --repair` arrives in Phase 07.'
         : 'Phase 07 provides the full doctor surface.',
   });
 }

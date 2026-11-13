@@ -129,7 +129,7 @@ describe('F01 build and queries', () => {
     }
   });
 
-  it('marks the index stale after a source change', async () => {
+  it('marks the index dirty after a source change (12.4)', async () => {
     const fixture = await indexFixture('F10-negative', 'f10-stale');
     try {
       const file = path.join(fixture.directory, 'src', 'api.ts');
@@ -139,7 +139,7 @@ describe('F01 build and queries', () => {
         cwd: fixture.directory,
         self: SELF,
       });
-      expect(status.staleness).toBe('stale');
+      expect(status.staleness).toBe('dirty');
       expect(status.roots[0]?.staleReason).toContain('files-changed');
     } finally {
       cleanup(fixture.directory);

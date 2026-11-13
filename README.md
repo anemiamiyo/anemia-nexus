@@ -1,7 +1,7 @@
 # Anemia Nexus
 
 > 以确定性索引为底座的**变更审计与 API 治理设施**，不是"更好的搜索工具"。
-> 当前状态：**Phase 00 已完成（11/11，其中 6 项为 pass-with-limit）；规范 v1.24 已冻结；Phase 01 以 pass-with-limits 关闭；Phase 02、Phase 03、Phase 04 已关闭；Phase 05（影响分析与审计）已实现并通过 G0–G12，等待负责人评审；增量、MCP 与发布验证仍未实现。**
+> 当前状态：**Phase 00 已完成（11/11，其中 6 项为 pass-with-limit）；规范 v1.24 已冻结；Phase 01 以 pass-with-limits 关闭；Phase 02–05 已关闭；Phase 06（增量、性能与一致性）已实现并通过 G0–G12 中的构建/一致性/恢复/调度/指纹/状态机项，性能 P3 目标未达（root 级保守重建），整体记为 pass-with-limits，等待负责人评审；MCP、复用性检测与发布验证仍未实现。**
 
 ---
 
@@ -19,7 +19,7 @@ Anemia Nexus 的目标是把"变更影响、公共 API 差分、复用检测"变
 
 **完整性承诺的严格边界**：所谓"零漏报"仅适用于**确定性静态关系**（`relationClass = certain`），且仅在该文件位于索引范围内、分析成功完成时成立。启发式关系带置信度标注；动态关系明确不保证识别。**禁止把"未发现引用"表述为"确认不存在引用"。**
 
-Phase 01 交付了 TS/TSX 的符号与引用索引、CLI 骨架、`status` / `doctor` 与最小查询面，并已由负责人以 pass-with-limits 关闭；Phase 02 增加 Vue 3 SFC 语义：`@vue/language-core` 投影、影子物化、坐标转译、`__VLS_` 过滤、Props/Emits/Slots 与 `propsCoverage`、四类模板引用边，以及 scip / ts / vue 三引擎的 `symbol_map`。Phase 03 增加 API Surface：五类公开证据来源（`package-exports` / `explicit-entry` / `barrel-derived` / `manual-override` / `none`）、`exportKind`、`nexus.baseline.json`、`api-snapshot`、`api-diff` 四级差分与 `@deprecated` 链路；构建写入改为单事务、迭代器分批的边算边写。Phase 04 增加文件/模块依赖图、静态调用图、架构 allow 规则、S1 样式链、跨 root 边界与 `nex deps`。Phase 05 增加 `nex impact`（风险与证据）、`nex preflight`（现有 API / 相似能力 / 依赖 / 上下文）、`nex postflight`（Git Diff / 修改符号 / Surface 差分 / 测试 / 授权检查）、`nex verify`（白名单与 `.nexus/trust.json`）、5.9 查询期根路由（root / roots / all）与测试关系表；增量、MCP 与发布验证仍是规划内容，相关命令返回 E24「未提供」，不会伪造结果。
+Phase 01 交付了 TS/TSX 的符号与引用索引、CLI 骨架、`status` / `doctor` 与最小查询面，并已由负责人以 pass-with-limits 关闭；Phase 02 增加 Vue 3 SFC 语义：`@vue/language-core` 投影、影子物化、坐标转译、`__VLS_` 过滤、Props/Emits/Slots 与 `propsCoverage`、四类模板引用边，以及 scip / ts / vue 三引擎的 `symbol_map`。Phase 03 增加 API Surface：五类公开证据来源（`package-exports` / `explicit-entry` / `barrel-derived` / `manual-override` / `none`）、`exportKind`、`nexus.baseline.json`、`api-snapshot`、`api-diff` 四级差分与 `@deprecated` 链路；构建写入改为单事务、迭代器分批的边算边写。Phase 04 增加文件/模块依赖图、静态调用图、架构 allow 规则、S1 样式链、跨 root 边界与 `nex deps`。Phase 05 增加 `nex impact`（风险与证据）、`nex preflight`（现有 API / 相似能力 / 依赖 / 上下文）、`nex postflight`（Git Diff / 修改符号 / Surface 差分 / 测试 / 授权检查）、`nex verify`（白名单与 `.nexus/trust.json`）、5.9 查询期根路由（root / roots / all）与测试关系表。Phase 06 增加 `nex update`（内容 Hash 变更检测、12.1 失效传播、按 root 保守重建、`--rebuild-affected` / `--files`）、12.3 提交协议补全与七注入点崩溃恢复、12.4 五态状态机、5.10 全局资源协调器与降级阶梯、5.11 `tsconfigHash` 与可复现指纹、12.2 增量=全量十项门禁、F16/F18 夹具与 P1–P8 性能采集；**文件级局部 AST 复用仍未实现**，P3 以 root 级重建口径记录并在报告中标注未达标。MCP、`print`、`doctor --repair` 与发布验证仍是 Phase 07 内容，相关命令返回 E24「未提供」，不会伪造结果。
 
 ### 1.1 适用范围与前置条件
 
@@ -44,7 +44,7 @@ Phase 01 交付了 TS/TSX 的符号与引用索引、CLI 骨架、`status` / `do
 
 ## 2. 主要功能与明确的非目标
 
-### 2.1 主要功能与规划阶段（TS/Vue 索引、检索、API Surface、关系图与影响审计已实现；其余未实现）
+### 2.1 主要功能与规划阶段（TS/Vue 索引、检索、API Surface、关系图、影响审计与增量更新已实现；其余未实现）
 
 | 能力                             | 说明                                                                                                        | 规划阶段 |
 | -------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------- |
@@ -54,7 +54,8 @@ Phase 01 交付了 TS/TSX 的符号与引用索引、CLI 骨架、`status` / `do
 | 关系分析                         | 文件/模块依赖、符号引用、导出重导出、静态调用、组件关系、测试关联（Phase 05 tests 表）；三分类 + 四档置信度 | 04–05    |
 | 变更影响分析                     | 直接/间接依赖者、受影响 Surface/组件/类型/测试、文档、盲区清单、风险等级与证据（Phase 05 已实现）           | 05       |
 | Preflight / Postflight / CI 门禁 | 变更前审计、变更后审计、`verify` 白名单、退出码门禁（Phase 05 已实现）                                      | 05       |
-| 增量与一致性                     | 失效传播、提交协议、崩溃恢复、五态状态机、增量=全量门禁                                                     | 06       |
+| 增量与一致性                     | 内容 Hash 变更检测、12.1 失效传播、`nex update`、提交协议、崩溃恢复、五态状态机、增量=全量门禁（Phase 06） | 06       |
+| 性能与内存                       | P1–P8 采集器、root 级增量测量、内存预算与降级阶梯（Phase 06；P3 未达标）                                    | 06       |
 | 复用性检测                       | 可解释的相似 API 检索、重复实现巡检                                                                         | 07       |
 | MCP 接入                         | 8 个工具，仅 `refresh` 可写索引                                                                             | 07       |
 | CLI                              | 21 个主命令 + 4 个兼容别名，`nex` / `anex` / `anemia`                                                       | 01–07    |
@@ -105,37 +106,60 @@ Phase 01 交付了 TS/TSX 的符号与引用索引、CLI 骨架、`status` / `do
 
 ```text
 anemia-nexus/
-├── .changeset/                 # changesets 配置
-├── .dsh/                       # 项目级 AI 协作规范（git 忽略）
+├── .changeset/                     # changesets 配置
+├── .dsh/                           # 项目级 AI 协作规范（git 忽略）
 │   └── AGENTS.md
-├── .github/workflows/ci.yml    # Node 22.16.0 / 24 双矩阵
-├── docs/                       # 技术规范主体（权威来源）
-│   ├── README.md               # 文档索引与职责
-│   ├── 00-…23-*.md             # 按原章号拆分的规范
+├── .github/workflows/ci.yml        # Node 22.16.0 / 24 双矩阵
+├── docs/                           # 技术规范主体（权威来源）
+│   ├── README.md                   # 文档索引与职责
+│   ├── 00-…23-*.md                 # 按原章号拆分的规范
 │   ├── appendix-a-d.md
-│   ├── runtime-api.md          # Node API 最低版本登记
-│   ├── phase-00/               # Phase 00 范围、门槛、验证报告
-│   ├── phase-01/               # 规范冻结、Phase 01 计划与任务清单
-│   └── phase-02/               # Phase 02 入场/裁定、计划门槛、任务清单
-├── fixtures/                   # 合成夹具（semantic-map、F15 identity）
-│   └── local/                  # 用户本地真实项目（git 忽略）
-├── phase00/                    # Phase 00 验证原型（非产品实现）
+│   ├── runtime-api.md              # Node API 最低版本登记
+│   ├── phase-00/                   # Phase 00 范围、门槛、验证报告
+│   ├── phase-01/ … phase-05/       # 各阶段入场/计划/任务/实施报告
+│   └── phase-06/                   # 增量、性能与一致性（本阶段）
+│       ├── 00-entry-and-decisions.md
+│       ├── 01-task-checklist.md
+│       ├── 02-plan-and-gates.md
+│       └── 03-implementation-report.md
+├── fixtures/                       # 合成夹具（F01–F18；local/ 为 git 忽略）
+│   ├── F01-reexport-chain/ … F14-multi-root/
+│   ├── F16-crash-recovery/         # 七注入点崩溃恢复
+│   ├── F17-config-security/
+│   ├── F18-scheduler/              # 3 root + 依赖顺序 + 降级
+│   └── local/                      # 用户本地真实项目（git 忽略）
+├── phase00/                        # Phase 00 验证原型与 results/（非产品实现）
 ├── packages/
-│   ├── core/                   # anemia-core：扫描/配置/索引/存储/查询
-│   ├── cli/                    # anemia-cli：CLI（bin: nex/anex/anemia）
-│   ├── mcp/                    # anemia-mcp：MCP Server（占位）
-│   └── adapter-vue/            # anemia-adapter-vue：Vue 适配（占位）
+│   ├── core/                       # anemia-core
+│   │   ├── src/
+│   │   │   ├── index/              # build / fingerprint / invalidation / equivalence / scip / mapping / declarations / symbol-id
+│   │   │   ├── store/              # schema / db / commit / manifest / lock / read / history / state / recovery / workspace / inject
+│   │   │   ├── discovery/          # roots / scan / ignore / tsconfig / typecheck
+│   │   │   ├── graph/              # dependencies / calls / style / architecture / cross-root / blindspots
+│   │   │   ├── surface/            # builder / diff / export-graph / store
+│   │   │   ├── audit/              # impact / preflight / postflight / verify / similar / context / docs / git
+│   │   │   ├── query/              # service / routing
+│   │   │   ├── vue/                # project / shadow / declarations / references / dump / fallback
+│   │   │   ├── config/             # schema / load / merge / json-schema / command-safety
+│   │   │   ├── scheduler.ts        # 5.10 全局资源协调器
+│   │   │   ├── status.ts / doctor.ts / init.ts / model.ts / errors.ts
+│   │   │   └── index.ts            # 公共 API
+│   │   └── test/                   # unit / integration / audit / vue / writer / incremental / recovery / scheduler
+│   ├── cli/                        # anemia-cli：src/{cli,render,context,main}.ts；bin: nex/anex/anemia
+│   ├── mcp/                        # anemia-mcp：MCP Server（Phase 07 前为占位）
+│   └── adapter-vue/                # anemia-adapter-vue（占位）
+├── tools/perf/                     # F11 生成器 + P1–P8 性能采集（generate.mjs / run.mjs）
 ├── eslint.config.js
 ├── tsconfig.base.json
 ├── vitest.config.ts
-├── package.json                # npm workspaces 根
-├── LICENSE / NOTICE            # Apache-2.0
+├── package.json                    # npm workspaces 根
+├── LICENSE / NOTICE                # Apache-2.0
 └── README.md
 ```
 
-- `packages/core` 与 `packages/cli` 已含 Phase 01 产品实现；`packages/mcp` 与 `packages/adapter-vue` 仍是占位入口。
-- `packages/cli` 已声明 `nex` / `anex` / `anemia` 三个 bin，指向同一份 `dist/main.js`。
-- `.nexus/`、`dist/`、`coverage/`、`node_modules/`、`fixtures/local/` 均不纳入版本控制。
+- `packages/core` 与 `packages/cli` 已含 Phase 01–06 产品实现；`packages/mcp` 与 `packages/adapter-vue` 仍是占位入口。
+- `.nexus/` 是索引目录（派生数据）：`roots/<rootId>/{index.db,manifest.json,surface.json,indexing.json,recovery-events.jsonl}`、`workspace.json`、`tmp/`、`cache/`；**不纳入版本控制**。
+- `fixtures/F16-crash-recovery` 与 `fixtures/F18-scheduler` 为 Phase 06 新增；`fixtures/F11` 由 `tools/perf/generate.mjs` 现场生成，不提交。
 - `nexus.baseline.json` 由 `nex api-snapshot --yes` 生成，纳入 git 后供 `api-diff` 使用。
 
 ---
@@ -180,6 +204,13 @@ anemia-nexus/
 | [`docs/phase-03/01-task-checklist.md`](docs/phase-03/01-task-checklist.md)                                      | Phase 03 完整任务清单与证据要求                                |
 | [`docs/phase-03/02-plan-and-gates.md`](docs/phase-03/02-plan-and-gates.md)                                      | Phase 03 gate、量化口径、测试矩阵与风险                        |
 | [`docs/phase-03/03-implementation-report.md`](docs/phase-03/03-implementation-report.md)                        | Phase 03 实施报告、证据、已知限制与自审回执                    |
+| [`docs/phase-04/00-entry-and-decisions.md`](docs/phase-04/00-entry-and-decisions.md)                            | Phase 04 入场、架构模块与调用图口径                            |
+| [`docs/phase-04/03-implementation-report.md`](docs/phase-04/03-implementation-report.md)                        | Phase 04 实施报告与已知限制                                    |
+| [`docs/phase-05/03-implementation-report.md`](docs/phase-05/03-implementation-report.md)                        | Phase 05 实施报告、impact/preflight/postflight/verify 证据     |
+| [`docs/phase-06/00-entry-and-decisions.md`](docs/phase-06/00-entry-and-decisions.md)                            | Phase 06 入场、增量粒度裁定、恢复/调度/指纹决策                |
+| [`docs/phase-06/01-task-checklist.md`](docs/phase-06/01-task-checklist.md)                                      | Phase 06 任务清单（编码前冻结）                                |
+| [`docs/phase-06/02-plan-and-gates.md`](docs/phase-06/02-plan-and-gates.md)                                      | Phase 06 Gate、十项等价口径、性能与内存口径                    |
+| [`docs/phase-06/03-implementation-report.md`](docs/phase-06/03-implementation-report.md)                        | Phase 06 实施报告、P1–P8 实测、已知限制与自审回执              |
 
 文档职责：`docs/` 是技术规范唯一权威来源；本 README 只负责安装、运行、配置、上手与能力边界；`.dsh/AGENTS.md` 只负责 AI 协作纪律，不复制错误码表或工具用法全集。
 
@@ -218,22 +249,28 @@ npm install --cache ./.npm-cache
 npm install            # 安装 workspace 依赖并生成/使用 package-lock.json
 npm run build          # tsup 构建全部 packages（ESM + d.ts，target node20）
 npm run typecheck      # tsc --noEmit，逐 package
-npm test               # Vitest；94 项（Phase 05）
+npm test               # Vitest；111 项（Phase 06）
 npm run test:watch     # Vitest watch
 npm run lint           # ESLint，含 Node 22.16.0 内置 API 越界检查
 npm run format         # Prettier 写入
 npm run format:check   # Prettier 检查
+npm run gate:incremental # 12.2 增量=全量 + F16 恢复门禁
+npm run perf           # P1–P8（默认 1 万行；写 stdout，可用 --output 落盘）
 npm run changeset      # 创建 changeset（发布流程尚未启用）
 npm run phase00        # Phase 00 全部验证（需要 Node 子进程权限）
 ```
 
-**Phase 05 已提供 `nex` / `anex` / `anemia` 命令（构建后）：**
+**Phase 06 已提供 `nex` / `anex` / `anemia` 命令（构建后）：**
 
 ```bash
 npm run build
 node packages/cli/dist/main.js init --roots all --write-config --yes
 node packages/cli/dist/main.js build
+node packages/cli/dist/main.js update                                  # 内容 Hash 变更检测 + 受影响 root 更新
+node packages/cli/dist/main.js update --files src/core.ts --format json # 强制把匹配文件视为变更
+node packages/cli/dist/main.js update --rebuild-affected --root ui      # 对变更 root 走全量重建
 node packages/cli/dist/main.js status
+node packages/cli/dist/main.js doctor
 node packages/cli/dist/main.js references <symbol>
 node packages/cli/dist/main.js references <symbol> --no-template   # 排除 Vue 模板边并声明
 node packages/cli/dist/main.js symbol <component-symbolId>
@@ -252,11 +289,11 @@ node packages/cli/dist/main.js search --roots all                  # 多 root �
 node packages/cli/dist/main.js doctor --dump-vue-map src/App.vue   # 打印投影与映射段，不落盘
 ```
 
-已实现：`init`、`build`、`status`、`doctor`（含 `--schema`、`--dump-vue-map`）、`symbol`、`references`、`search`、`deps`、`api-snapshot`、`api-diff`、`impact`、`preflight`、`postflight`、`verify`；`query` 为 `search` 的兼容别名。Phase 05 的 `impact` / `preflight` / `postflight` 输出按 `certain` / `heuristic` / `dynamic-unresolved` 分列，每条风险/finding 带文件、行、规则与证据；`search` / `symbol` / `references` / `deps` / `impact` 支持 5.9 的 `--root` / `--roots all` 分组。其余命令（`update`、`context`、`similar`、`audit-duplicates`、`print`、`mcp`、`test`）仍返回 E24「未提供」，退出码 1；`doctor --repair` / `--mcp`、`status --json-schema` 同样仍为 E24。`verify` 只执行 `commands.allow` 中的完整命令 + 参数，授权记录在 `.nexus/trust.json`；未授权时显式 verify 报 E12，postflight 内部标 `skipped-unauthorized`。
+已实现：`init`、`build`、`update`、`status`、`doctor`（含 `--schema`、`--dump-vue-map`）、`symbol`、`references`、`search`、`deps`、`api-snapshot`、`api-diff`、`impact`、`preflight`、`postflight`、`verify`；`query` 为 `search` 的兼容别名。Phase 06 的 `update` 采用**按 root 的保守重建**：内容 Hash 变化只重建受影响 root，未变化 root 零写入；不宣称文件级局部 AST 复用。`build` / `update` 与查询均先跑 12.3.3 恢复；状态机 `fresh` / `dirty` / `indexing` / `stale` / `failed` 统一由 `staleness` 输出，源文件变化后为 `dirty`，更新成功后才回 `fresh`。`impact` / `preflight` / `postflight` 输出按 `certain` / `heuristic` / `dynamic-unresolved` 分列，每条风险/finding 带文件、行、规则与证据；`search` / `symbol` / `references` / `deps` / `impact` 支持 5.9 的 `--root` / `--roots all` 分组。其余命令（`context`、`similar`、`audit-duplicates`、`print`、`mcp`、`test`）仍返回 E24「未提供」，退出码 1；`doctor --repair` / `--mcp`、`status --json-schema` 同样仍为 E24。`verify` 只执行 `commands.allow` 中的完整命令 + 参数，授权记录在 `.nexus/trust.json`；未授权时显式 verify 报 E12，postflight 内部标 `skipped-unauthorized`。
 
 本项目是 Node 库与 CLI，不是前端应用，**没有常驻 dev server**。开发期使用 `npm run test:watch`、编辑器类型检查、`npm run build` 与 `node packages/cli/dist/main.js`；CLI 不启动任何后台常驻进程。
 
-### 7.1 安装后的手动接入（规划；`nex` 尚未实现）
+### 7.1 安装后的手动接入（Phase 07 提供；当前 `print` 仍返回 E24）
 
 以下四步来自 21.1，**工具实现后才可执行**；工具只打印接入物料，不代写任何配置文件：
 
@@ -292,7 +329,8 @@ node packages/cli/dist/main.js doctor --dump-vue-map src/App.vue   # 打印投�
 - [x] Phase 03 验证：`npm test` 73 项；F07 evidenceSource/exportKind 覆盖率 100%；反向误报 0；基线两次逐字节一致；`act -j verify --container-options "-m 4g" --action-offline-mode` 结果见报告。
 - [x] **Phase 03 已由负责人 2026-11-13 以 pass 关闭**；同时批准进入 **Phase 04（关系图与架构分析）**，裁定见 [`docs/phase-03/00-entry-and-decisions.md`](docs/phase-03/00-entry-and-decisions.md) §8。
 - [x] **Phase 04 已由负责人 2026-11-13 以 pass 关闭**：文件/模块依赖图、静态调用图、架构模块与 `allow` 规则、S1 样式链、跨 root 边界、盲区清单、`nex deps`、schema v3；本地 79 项 + act Node 22/24 双矩阵 79 项通过。报告见 [`docs/phase-04/03-implementation-report.md`](docs/phase-04/03-implementation-report.md)。
-- [x] **Phase 05 已实现，G0–G12 通过（pass），等待负责人评审**：`nex impact` / `preflight` / `postflight` / `verify`、5.9 根路由、`tests` 表（schema v4）、F08/F12 夹具与 F14 路由断言；certain 口径 F08 消费方 0 漏报；执行前后 `git status` 无新增残留。报告见 [`docs/phase-05/03-implementation-report.md`](docs/phase-05/03-implementation-report.md)。
+- [x] **Phase 05 已由负责人以 pass 关闭**：`nex impact` / `preflight` / `postflight` / `verify`、5.9 根路由、`tests` 表（schema v4）、F08/F12 夹具与 F14 路由断言；certain 口径 F08 消费方 0 漏报；执行前后 `git status` 无新增残留。报告见 [`docs/phase-05/03-implementation-report.md`](docs/phase-05/03-implementation-report.md)。
+- [x] **Phase 06 已实现（pass-with-limits）**：内容 Hash 变更检测与 12.1 失效表、`nex update`（按 root 保守重建、`--rebuild-affected` / `--files`）、12.3 提交协议补全与七注入点恢复、12.4 五态状态机、5.10 资源协调器与降级阶梯、5.11 `tsconfigHash`、12.2 十项等价门禁、F16/F18 夹具、`tools/perf` P1–P8 采集；本地 111 项 + act Node 22.16.0 / 24.x 双矩阵 111 项通过。**P3/P6 未达 16.2 目标**，F18 默认串行；详见 [`docs/phase-06/03-implementation-report.md`](docs/phase-06/03-implementation-report.md)。
 
 ### 8.2 Phase 00 验证结果
 
@@ -358,14 +396,49 @@ node packages/cli/dist/main.js doctor --dump-vue-map src/App.vue   # 打印投�
 | G9 act CI         | pass | `act -j verify --container-options "-m 4g" --action-offline-mode`：Node 22.16.0 与 24.22.3 两个矩阵各 73 项通过（首次不加 `--action-offline-mode` 因 GitHub 连接失败，见报告） |
 | G10 自审          | pass | 报告、任务回填、已知限制、自审回执齐全；工作区仅负责人 `.actrc` 与本轮变更                                                                                                     |
 
+### 8.2.4 Phase 06 验证结果
+
+| Gate | 结果 | 关键证据 |
+| --- | --- | --- |
+| G0 变更检测/失效表 | pass | 12.1 规则表；A/M/D/R；mtime 同内容不触发；config/tsconfig → full |
+| G1 Update/提交 | pass | 无变化零写；增量重建；失败保留旧 committed；锁与恢复 |
+| G2 增量=全量 | pass | 十项全等；F08 四类变更；10k 夹具 `buildFingerprint` 相同 |
+| G3 崩溃恢复 | pass | F16 七注入点；manifest-repaired / pending-discarded / stale-surface |
+| G4 状态机 | pass | 五态转换表；dirty/indexing；doctor 非法转换 |
+| G5 调度与降级 | pass（串行） | 预算/权重/依赖顺序/五级阶梯/E20/取消无提交/旧索引保留 |
+| G6 指纹 | pass | 字段齐全；`tsconfigHash` 规范化；同输入可复现；platform/gitCommit 不单独触发 |
+| G7 构建与回归 | pass | build/typecheck/lint/format:check 退出 0；111 项测试全绿 |
+| G8 性能与内存 | **partial** | P1/P2/P4/P5/P6/P8 有记录；P3 1k/5k/10k 为 2.48/3.49/5.31s，**超 2s**；P6 10k p95 46.5ms **超 30ms**；P7 `not-available` |
+| G9 输出与 CLI | pass | update 四格式同源；无 ANSI/绝对路径/时间戳；退出码 0/1/64 |
+| G10 act | pass | `act -j verify --container-options "-m 4g" --action-offline-mode`：Node 22.16.0 / 24.x 双矩阵各 111 项，`Job succeeded` ×2 |
+| G11 文档 | pass | README（含目录结构）、docs/README、runtime-api、phase-06 四份文档、报告 |
+| G12 自审 | pass（报告层） | 任务回填、已知问题、自审回执、`git status` 无验证残留 |
+
+**性能实测摘要**（3 次中位/最大）：
+
+| 场景 | 1k 行 | 5k 行 | 10k 行 | 5 万行档目标 | 结论 |
+| --- | --- | --- | --- | --- | --- |
+| P1 冷启动全量 | 2.43/2.46s | 3.25/3.25s | 4.09/4.10s | ≤ 20s | pass |
+| P3 单文件增量 | 2.48/2.50s | 3.49/3.50s | 5.31/5.33s | ≤ 2s | **未达标** |
+| P4 20 文件增量 | 2.48/2.48s | 3.47/3.47s | 5.27/5.33s | ≤ 8s | pass |
+| P5 多 root | 4.51s（3 root 串行） | — | — | 无数值目标 | 记录（串行） |
+| P6 查询 p50/p95 | 9.6/10.2ms | 25.9/27.0ms | 44.3/46.5ms | ≤ 30ms | **未达标（10k）** |
+| P7 MCP | — | — | — | — | not-available（Phase 07） |
+| P8 崩溃恢复 | 12ms | — | — | ≤ 5s | pass |
+
+峰值 RSS：1k 192.4 MB；5k 211.1 MB；10k 227.7 MB（5 万行档目标 ≤400 MB，硬上限 550 MB）。SQLite（含 WAL）：1.38 / 6.11 / 12.06 MB。**50k/300k/1M 未测，不外推。**
+
 ### 8.3 明确未完成
 
-- **Phase 05 已实现，G0–G12 通过（pass），等待负责人评审；尚未进入 Phase 06**。Phase 04 的依赖/调用图与 Phase 05 的 impact/preflight/postflight/verify 已提供；增量、MCP 8 工具、`print` 物料、`doctor --repair` 尚未完成前仍返回 E24。
+- **Phase 06 已实现（pass-with-limits），等待负责人评审；尚未进入 Phase 07**。Phase 06 的 `update` / 恢复 / 状态机 / 调度器 / 指纹与 12.2 门禁已提供；MCP 8 工具、`print` 物料、`doctor --repair`、`nex test` 与发布验证仍未完成，相关命令返回 E24。
+- **文件级增量未实现**：`update` 以 root 为保守重建单位；单文件修改会重建整个 root。P3 目标（5 万行 ≤ 2s）在 1k/5k/10k 实测中未达到，报告已显式标注。
+- **多 root 并行未启用**：调度器计算并发上限，但默认并发位 1（内存安全）；F18 以串行口径记录，不宣称并行加速。
+- **P7（MCP 延迟）不可用**：MCP server 属 Phase 07；性能报告将其记为 `not-available`，不以 0 或伪造值代替。
 - `packages/mcp` / `packages/adapter-vue` 仍是占位入口；`nexus.baseline.json` 由项目按需生成并提交，本仓库根未提交默认基线。
-- 多 root 的 `symbol` / `references` 查询返回 E24；`status --json-schema` 返回 E24；`--pager` 不启动外部分页器。
-- Vue 语义仅覆盖 Phase 02 范围：真实 TS 文件 import `.vue` 的跨语言边可能缺失；复杂 Props / Slot 未解析时显式 heuristic；`vue.typeResolver` 不执行；`update` 仍 E24。
+- `status --json-schema`、`doctor --repair` / `--mcp`、`print`、`mcp`、`context`、`similar`、`audit-duplicates`、`test` 仍返回 E24；`--pager` 不启动外部分页器。
+- Vue 语义仅覆盖 Phase 02 范围：真实 TS 文件 import `.vue` 的跨语言边可能缺失；复杂 Props / Slot 未解析时显式 heuristic；`vue.typeResolver` 不执行。
 - 未执行发布验证（`npm pack` 12 项）与 changesets 发布流程；包仍为 `private: true`。
-- SCIP 子进程峰值 RSS 未采集（`scipPeakRssMB: null` 并带原因）；G5 未使用真实 kill -9；G8 内存压力为模拟；G9 非 OS 级网络沙箱；G10 边为全局重算；百万行档按负责人批准未验证。
+- SCIP 子进程峰值 RSS 未采集（`scipPeakRssMB: null` 并带原因）；F16 使用 SIGKILL 自终止而非物理断电；G8 内存压力为模拟；G9 非 OS 级网络沙箱；百万行档按负责人批准未验证。
 
 ---
 
@@ -380,11 +453,11 @@ node packages/cli/dist/main.js doctor --dump-vue-map src/App.vue   # 打印投�
 | 02   | Vue 语义与引用查询   | **pass；V1–V4/V6 通过，已获准进入 Phase 03** |
 | 03   | API Surface 与基线   | **已关闭**（pass；负责人 2026-11-13 接受）   |
 | 04   | 关系图与架构分析     | **已关闭**（pass；G0–G10 通过）              |
-| 05   | 影响分析与审计       | **pass；G0–G12 通过，等待负责人评审**        |
-| 06   | 增量、性能与一致性   | Phase 05 通过                                |
+| 05   | 影响分析与审计       | **已关闭**（pass；G0–G12 通过）                    |
+| 06   | 增量、性能与一致性   | **pass-with-limits；等待负责人评审**（P3 未达标）  |
 | 07   | 复用性、MCP 与交付   | Phase 06 通过                                |
 
-**Phase 00 的结论具有否决权**：任一 P0 项无法验证通过，必须停止并提交架构调整申请，不得"先做着看"。Phase 00–04 已关闭；Phase 05 已实现并通过 G0–G12，等待负责人评审；**未经书面批准不得进入 Phase 06**。
+**Phase 00 的结论具有否决权**：任一 P0 项无法验证通过，必须停止并提交架构调整申请，不得"先做着看"。Phase 00–05 已关闭；Phase 06 已实现并通过一致性/恢复/调度/指纹/状态机门禁，但 P3 性能目标未达，按 `pass-with-limits` 等待负责人裁定；**未经书面批准不得进入 Phase 07**。
 
 未来接入顺序（工具实现后，按 21.1）：安装 → 手动接入（MCP / AGENTS.md / Skill）→ `nex init` → `nex build` → `nex status`。工具只打印接入物料，不代写任何配置文件。
 
@@ -406,7 +479,7 @@ node packages/cli/dist/main.js doctor --dump-vue-map src/App.vue   # 打印投�
 
 ## 11. 安全与隐私边界
 
-以下为**产品设计约束**（尚未实现，但实现时必须遵守）：
+以下为**产品约束（Phase 01–06 已按此实现，后续阶段继续遵守）**：
 
 - 默认只读、默认离线；打开项目、扫描目录、建立索引、响应查询、启动 MCP 均不得执行被分析项目的代码。
 - 配置文件默认是 `.nexus/nexus.config.json`（纯数据，Zod `strict()`）；`.ts` 配置是可执行代码，必须显式授权，且在独立子进程中加载、禁网、限时。
@@ -423,14 +496,20 @@ Phase 00 验证只在合成夹具中执行了受限配置与恶意用例；未�
 
 规范 v1.24 已冻结。Phase 00 与 Phase 01 的完整限制分别见 [`docs/phase-00/02-validation-report.md`](docs/phase-00/02-validation-report.md) 与 [`docs/phase-01/03-implementation-report.md`](docs/phase-01/03-implementation-report.md)。
 
-Phase 01/02 新增加的限制：
+Phase 06 新增加的限制：
 
-- 多 root 查询面不完整：`symbol` / `references` 仅支持单 root，多 root 返回 E24；`search --roots all` 可用。
-- `status --json-schema`、`doctor --repair` / `--mcp`、`print`、`mcp`、`update` 均返回 E24；`doctor --dump-vue-map` 与 Surface 检查已可用。
-- Vue：真实 TS 文件 import `.vue` 的跨语言边可能缺失；复杂 Props / Slot 未解析时标 heuristic；`vue.typeResolver` 不执行，仅告警；Vue 增量未实现（Phase 06）。
-- SCIP 子进程峰值 RSS 不可观测，manifest 记录 `scipPeakRssMB: null` 与原因；不得把父进程 RSS 当作 SCIP 峰值。
-- 真实增量、失效传播、五态状态机的 `dirty` / `indexing` 运行期转换未实现；Phase 01/02 只有全量 build 与提交/恢复基础。
-- TS 配置只支持可擦除语法；enum / namespace 值可能加载失败。持久授权 `.nexus/trust.json` 只读取，未提供写入口（`--trust-config` 仅本次进程）。
+- **增量粒度为 root**：`update` 对受影响 root 做完整重建；单文件修改仍需重建该 root。P3 在 1k/5k/10k 行实测均超过 2s，未达到 16.2 的 5 万行目标；不得把它表述为文件级增量。
+- **多 root 默认串行**：调度器计算 `min(配置, 内存/预估峰值, CPU-1)` 的并发位，但默认 `resources.concurrency = 1`；F18/P5 记录的是串行耗时。真并行子进程编排留待后续评审。
+- **P7 不可用**：MCP 属 Phase 07，性能报告记 `not-available`；不得用 0 或推测值填补。
+- **50k/300k/1M 档未验证**：本阶段只测 1k/5k/10k；16.2/21.2 的更大档位不外推。
+- **P8 使用 SIGKILL 自终止**：模拟断电，不等价于物理断电；恢复以 DB/manifest 最终状态与旧索引可读为准。
+- **SCIP 子进程峰值 RSS 不可观测**：manifest 记录 `scipPeakRssMB: null` 与原因；父进程 RSS 不得当作 SCIP 峰值。
+- **恢复后的 manifest 标记 stale**：当 manifest 由 DB 重建时（`recovered: true`），状态为 `stale`，必须执行一次 `update`/`build` 才回到 `fresh`；这是保守设计，不伪造 freshness。
+- **查询期 freshness 使用 stat 快路径**：`statHash`（path/size/mtime）一致时跳过内容 Hash 以控制查询延迟；构建/更新仍以 `filesHash` 为权威。外部工具若保留 size 与 mtime 改写内容，查询可能暂时误判 fresh，直到下一次 `update`/`build`。
+- **`status` 的 `dirty` 语义变更**：源文件变化后状态由旧版 `stale` 改为 12.4 规定的 `dirty`；Phase 05 断言已同步。
+- **根集合移除不自动删目录**：`update` 不会删除已移除 root 的 `.nexus/roots/<id>`；`doctor` 可诊断，清理留给 Phase 07 `doctor --repair`。新增 root 只建自己的索引，已有 root 不因 `rootSetHash` 变化而重建（17.2 #15）。
+- **`resources` 配置新增**：`defaults.resources.maxMemoryMB` / `concurrency`；旧索引首次 `update` 会因 `configHash` 变化做一次完整重建。
+- Vue 语义仅覆盖 Phase 02 范围；多 root 查询已支持（Phase 05），但跨 root BFS 仍禁止。
 - `--pager` 不启动外部分页器；`--budget-hint` 只记录，不做裁剪；默认不做分页（无静默截断）。
 - 双 Node 验证按本机运行时归属执行：PowerShell / fnm 提供 Node 24.22.2，CMD / nvm-windows 提供 Node 22.16.0；不修改项目依赖或用户全局配置。
 
@@ -444,17 +523,17 @@ Phase 01/02 新增加的限制：
 | TS 配置授权流程 UX              | E18 / 授权执行原型通过；非 TTY 与交互体验未验证                                       |
 | 百万行档性能                    | 按负责人批准不验证，由后续真实项目实测替代                                            |
 
-Phase 00 新增的限制（必须在 Phase 01 前评审）：
+Phase 00 历史限制（保留记录，已被后续阶段部分覆盖）：
 
 - SCIP 固定 0.4.0；升级到 0.6.x 会引入 TS 6 / Node ≥22.23.4 冲突，需单独决策。
 - G5 使用 `process.exit(137)` 模拟崩溃，未用真实 kill -9。
 - G8 内存压力为确定性模拟，未接真实 RSS。
 - G9 不是 OS 级网络沙箱。
-- G10 的引用/依赖/调用边为全局重算，未实现 12.1 的失效传播。
+- G10 的引用/依赖/调用边在 Phase 00 为全局重算；Phase 06 已补 12.1 失效表与 root 级保守重建，但文件级局部复用仍未实现。
 
 待确认：
 
-- Phase 05 是否通过负责人评审并进入 Phase 06（**当前等待**）。
+- Phase 06 是否以 `pass-with-limits` 通过并授权进入 Phase 07（P3 性能未达标；**当前等待**）。
 - 4 个 workspace 包仍为 `private: true`；Phase 07 发布前需按 changesets 流程调整。
 - `npm ci` 完整重装在本地未重跑；Phase 03 以 `npm ci --dry-run` 与 act 容器内 `npm ci` 作为基线，历史记录见 Phase 01 报告 §11。
 

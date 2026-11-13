@@ -232,6 +232,42 @@ function buildLines(data: Row): string[] {
   return lines;
 }
 
+function updateLines(data: Row): string[] {
+  const lines: string[] = [];
+  for (const root of rowsOf(data, 'roots')) {
+    if (root.ok === true) {
+      const changed = asRecord(root.changed);
+      lines.push(
+        `root ${str(root.rootId)}  mode=${str(root.mode, 'full')}  files=${field(root.files)} symbols=${field(root.symbols)} refs=${field(root.references)} changed=${field(changed?.total ?? 0)} (+${field(changed?.added ?? 0)} ~${field(changed?.modified ?? 0)} -${field(changed?.deleted ?? 0)} >${field(changed?.renamed ?? 0)}) ms=${field(root.durationMs)} build=${str(root.buildFingerprint, '').slice(0, 12)}${root.skipped === true ? '  skipped' : ''}`,
+      );
+    } else {
+      lines.push(
+        `root ${str(root.rootId)}  failed  code=${str(root.errorCode, 'E23')}  ${str(root.errorMessage)}`,
+      );
+    }
+  }
+  const failed = Array.isArray(data.failedRoots) ? data.failedRoots : [];
+  lines.push(`failedRoots ${failed.length === 0 ? '-' : failed.join(',')}`);
+  lines.push(`totalMs ${field(data.totalMs)}`);
+  const resources = asRecord(data.resources);
+  if (resources !== null) {
+    lines.push(
+      `resources budgetMB=${field(resources.budgetMB)} concurrency=${field(resources.concurrency)} peakRssMB=${field(resources.peakRssMBGlobal)} degraded=${Array.isArray(resources.degradedStages) ? (resources.degradedStages.length === 0 ? '[]' : resources.degradedStages.join(',')) : '[]'}`,
+    );
+  }
+  const recovery = asRecord(data.recovery);
+  if (recovery !== null) {
+    const repaired = Array.isArray(recovery.repaired) ? recovery.repaired : [];
+    const invalid = Array.isArray(recovery.invalid) ? recovery.invalid : [];
+    if (repaired.length > 0 || invalid.length > 0) {
+      lines.push(
+        `recovery repaired=${repaired.length === 0 ? '-' : repaired.join(',')} invalid=${invalid.length === 0 ? '-' : invalid.join(',')}`,
+      );
+    }
+  }
+  return lines;
+}
+
 function depsLines(data: Row): string[] {
   const lines: string[] = [];
   for (const item of rowsOf(data)) {
@@ -527,6 +563,8 @@ function entriesFor(command: string, data: Row): string[] {
       return initLines(data);
     case 'build':
       return buildLines(data);
+    case 'update':
+      return updateLines(data);
     case 'api-snapshot':
       return apiSnapshotLines(data);
     case 'api-diff':
@@ -750,10 +788,11 @@ export function renderMarkdown(input: RenderInput): string {
         '',
       );
     }
-  } else if (command === 'build') {
+  } else if (command === 'build' || command === 'update') {
     const rows = rowsOf(data, 'roots').map((root) => [
       str(root.rootId),
       field(root.ok),
+      str(root.mode, 'full'),
       field(root.symbols),
       field(root.references),
       field(root.durationMs),
@@ -762,7 +801,7 @@ export function renderMarkdown(input: RenderInput): string {
     lines.push(
       '## Roots',
       '',
-      markdownTable(['Root', 'OK', 'Symbols', 'References', 'ms', 'Build/Error'], rows),
+      markdownTable(['Root', 'OK', 'Mode', 'Symbols', 'References', 'ms', 'Build/Error'], rows),
       '',
     );
   } else if (['impact', 'preflight', 'postflight', 'verify'].includes(command)) {
@@ -792,6 +831,8 @@ function conclusion(command: string, data: Row): string {
       return `Doctor: ${field(asRecord(data.summary)?.pass ?? 0)} pass, ${field(asRecord(data.summary)?.warn ?? 0)} warn, ${field(asRecord(data.summary)?.fail ?? 0)} fail`;
     case 'build':
       return `Build: ${Array.isArray(data.failedRoots) && data.failedRoots.length > 0 ? 'failed' : 'ok'}`;
+    case 'update':
+      return `Update: ${Array.isArray(data.failedRoots) && data.failedRoots.length > 0 ? 'failed' : 'ok'}, ${rowsOf(data, 'roots').filter((root) => root.mode === 'fresh').length} fresh`;
     case 'api-snapshot':
       return `API baseline: ${str(data.path, '-')} (${field(asRecord(data.counts)?.entries ?? 0)} entries)`;
     case 'api-diff':

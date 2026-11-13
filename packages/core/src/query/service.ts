@@ -16,6 +16,7 @@ import { loadConfig, type LoadedConfig } from '../config/load.js';
 import { statusReport, type RootStatus, type StatusReport, type WarningItem } from '../status.js';
 import { resolveQueryScope, type ScopeSelection } from './routing.js';
 import { databasePath, manifestPath, readManifest } from '../store/manifest.js';
+import { recoverWorkspace, needsRecovery } from '../store/recovery.js';
 import {
   findSymbolsByName,
   openReadStore,
@@ -110,6 +111,19 @@ export interface PreparedContext {
 export async function prepareContext(options: QueryOptions): Promise<PreparedContext> {
   let loadedConfig: LoadedConfig | null = null;
   const warnings: WarningItem[] = [];
+  // 12.3.3: recover interrupted commits before serving any query. The cheap
+  // marker pre-check avoids a full DB open on every steady-state query.
+  try {
+    if (needsRecovery(options.projectRoot)) {
+      recoverWorkspace(options.projectRoot, { integrityCheck: false });
+    }
+  } catch (error) {
+    warnings.push({
+      code: 'E19',
+      message: `recovery failed: ${error instanceof Error ? error.message : String(error)}`,
+      severity: 'warning',
+    });
+  }
   try {
     loadedConfig = await loadConfig({
       projectRoot: options.projectRoot,

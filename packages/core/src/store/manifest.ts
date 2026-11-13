@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import type { BlindSpot, Coverage, StalenessState, VueAnalysisSummary } from '../model.js';
 import type { ANALYZER_VERSION } from '../index/analyzer.js';
+import { crashPoint } from './inject.js';
 
 export interface ManifestCoverage extends Coverage {
   semanticCoverage: number | null;
@@ -34,6 +35,13 @@ export interface RootManifest {
   buildFingerprint: string;
   filesHash: string;
   configHash: string;
+  /** Content hash of the root tsconfig (docs/12-indexing.md 12.1). */
+  tsconfigHash?: string;
+  /** Cheap tsconfig stat for query-time freshness. */
+  tsconfigMtimeMs?: number;
+  tsconfigSize?: number;
+  /** Cheap `(path,size,mtime)` probe for query-time freshness (12.4.2). */
+  statHash?: string;
   rootSetHash: string;
   ignoreHash: string;
   analyzerVersion: typeof ANALYZER_VERSION;
@@ -85,6 +93,36 @@ export interface RootManifest {
   dbBytes: number;
   walBytes: number;
   degraded: string[];
+  /** Auxiliary only; never part of the fingerprint (docs/05-data-model.md 5.11). */
+  gitCommit?: string | null;
+  /** How this build was produced (Phase 06). */
+  mode?: 'full' | 'incremental';
+  changed?: {
+    added: number;
+    modified: number;
+    deleted: number;
+    renamed: number;
+    total: number;
+    reasons: string[];
+    files?: string[];
+  };
+  invalidatedFiles?: string[];
+  lastIntegrityCheck?: {
+    at: string;
+    result: 'pass' | 'fail' | 'not-run';
+    compared: string[];
+    differences?: number;
+    sample?: string[];
+  } | null;
+  recoveryEvents?: string[];
+  /** True when the manifest was rebuilt from the DB after a crash. */
+  recovered?: boolean;
+  resources?: {
+    budgetMB: number;
+    concurrency: number;
+    peakRssMBGlobal: number;
+    degradedStages: string[];
+  };
   warnings: Array<{ code: string; message: string; severity: 'warning' | 'error' }>;
   configLoads: Array<{
     path: string;
@@ -123,6 +161,7 @@ export function writeManifestAtomic(filePath: string, manifest: RootManifest): v
   } finally {
     fs.closeSync(handle);
   }
+  crashPoint('manifest-tmp-written');
   try {
     fs.renameSync(temporary, filePath);
   } catch (error) {

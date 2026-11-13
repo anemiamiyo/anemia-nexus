@@ -11,6 +11,20 @@ import { nexusError } from '../errors.js';
  */
 const GIT_MAX_BUFFER = 32 * 1024 * 1024;
 
+/** HEAD commit for the manifest; auxiliary only, never a fingerprint input. */
+export function headCommit(projectRoot: string): string | null {
+  try {
+    const value = execFileSync('git', ['-C', projectRoot, 'rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+      timeout: 15_000,
+      windowsHide: true,
+    }).trim();
+    return value === '' ? null : value;
+  } catch {
+    return null;
+  }
+}
+
 export type GitChangeStatus = 'A' | 'M' | 'D' | 'R';
 
 export interface GitChange {

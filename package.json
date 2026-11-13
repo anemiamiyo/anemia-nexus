@@ -17,6 +17,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "phase00": "node phase00/run-all.mjs",
+    "perf": "node tools/perf/run.mjs --loc 10000 --repetitions 3",
+    "gate:incremental": "vitest run packages/core/test/incremental.test.ts packages/core/test/recovery.test.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

@@ -138,6 +138,20 @@ function progressReporter(context: CliContext): (event: BuildProgressEvent) => v
   };
 }
 
+/** Global `--root` / `--roots` for lifecycle commands; undefined means all. */
+function selectedRootIds(opts: Record<string, unknown>): string[] | undefined {
+  const roots = typeof opts.roots === 'string' ? opts.roots.trim() : '';
+  if (roots !== '' && roots !== 'all') {
+    return roots
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry !== '');
+  }
+  const root = typeof opts.root === 'string' ? opts.root.trim() : '';
+  if (root !== '') return [root];
+  return undefined;
+}
+
 function emptyCoverage(): Coverage {
   return {
     filesCovered: 0,
@@ -341,6 +355,7 @@ export function buildProgram(): Command {
         loadedConfig,
         onProgress: progressReporter(context),
         serial: opts.serial === true,
+        selectedRootIds: selectedRootIds(opts),
       });
       const failedRoots = result.failedRoots;
       const coverage = emptyCoverage();
@@ -386,6 +401,107 @@ export function buildProgram(): Command {
           notes: failedRoots.length > 0 ? [`failed roots: ${failedRoots.join(', ')}`] : [],
         },
         exitCode: failedRoots.length > 0 ? 1 : 0,
+      };
+    });
+  });
+
+  const update = addExamples(
+    program
+      .command('update')
+      .description('incremental update: content-hash change detection per root')
+      .helpGroup('Lifecycle')
+      .option('--rebuild-affected', 'force a full rebuild for every changed root')
+      .option('--files <glob>', 'treat matching project files as changed')
+      .option('--serial', 'build roots serially (concurrency 1)')
+      .option('--budget-mb <n>', 'per-root memory budget hint'),
+    ['nex update', 'nex update --files src/api.ts --format json'],
+  );
+  update.action(async (_options, command: Command) => {
+    await execute(command, async (context) => {
+      const opts = command.optsWithGlobals() as Record<string, unknown>;
+      let budgetMB: number | undefined;
+      if (opts.budgetMb !== undefined) {
+        const parsed = Number.parseInt(String(opts.budgetMb), 10);
+        if (!Number.isInteger(parsed) || parsed <= 0) {
+          throw nexusError('E00', '--budget-mb must be a positive integer', {
+            reason: `received ${JSON.stringify(opts.budgetMb)}`,
+            suggestion: 'Pass --budget-mb <positive integer>.',
+          });
+        }
+        budgetMB = parsed;
+      }
+      const loadedConfig = await loadConfig({
+        projectRoot: context.projectRoot,
+        trustConfig: context.trustConfig,
+      });
+      const result = await buildWorkspace({
+        projectRoot: context.projectRoot,
+        loadedConfig,
+        onProgress: progressReporter(context),
+        serial: opts.serial === true,
+        mode: 'update',
+        selectedRootIds: selectedRootIds(opts),
+        forceFull: opts.rebuildAffected === true,
+        forcedGlobs: typeof opts.files === 'string' ? [opts.files] : undefined,
+        budgetMB,
+      });
+      const coverage = emptyCoverage();
+      let symbols = 0;
+      let certain = 0;
+      let unresolved = 0;
+      const degraded = new Set<string>();
+      for (const root of result.roots) {
+        if (!root.ok || root.coverage === null) continue;
+        coverage.filesCovered += root.coverage.filesCovered;
+        coverage.filesSkipped += root.coverage.filesSkipped;
+        coverage.filesIgnored += root.coverage.filesIgnored;
+        coverage.filesFailed += root.coverage.filesFailed;
+        coverage.resolved += root.coverage.resolved;
+        coverage.unresolved += root.coverage.unresolved;
+        coverage.unmapped += root.coverage.unmapped;
+        coverage.filteredInternal += root.coverage.filteredInternal ?? 0;
+        symbols += root.symbols;
+        certain += root.coverage.resolved;
+        unresolved += root.coverage.unresolved;
+        for (const entry of root.degraded) degraded.add(entry);
+      }
+      const invalid = result.recovery?.invalid ?? [];
+      const notes: string[] = [];
+      if (result.failedRoots.length > 0)
+        notes.push(`failed roots: ${result.failedRoots.join(', ')}`);
+      if (invalid.length > 0) notes.push(`invalid roots: ${invalid.join(', ')} (run nex doctor)`);
+      if (result.roots.every((root) => root.mode === 'fresh'))
+        notes.push('all roots fresh; no files written');
+      for (const root of result.roots) {
+        if (root.changed !== undefined && root.changed.reasons.length > 0) {
+          notes.push(`${root.rootId}: ${root.changed.reasons.join(', ')}`);
+        }
+      }
+      return {
+        data: {
+          command: 'update',
+          roots: result.roots,
+          failedRoots: result.failedRoots,
+          totalMs: result.totalMs,
+          resources: result.resources ?? null,
+          recovery: result.recovery ?? null,
+          counts: {
+            total: symbols,
+            returned: symbols,
+            certain,
+            heuristic: 0,
+            dynamicUnresolved: 0,
+            partial: unresolved,
+          },
+          coverage,
+          truncated: false,
+          nextCursor: null,
+          staleness: result.failedRoots.length > 0 || invalid.length > 0 ? 'stale' : 'fresh',
+          buildFingerprint: result.roots.find((root) => root.ok)?.buildFingerprint ?? null,
+          degraded: [...degraded].sort(),
+          notes,
+        },
+        exitCode: result.failedRoots.length > 0 || invalid.length > 0 ? 1 : 0,
       };
     });
   });
@@ -1028,7 +1144,6 @@ export function buildProgram(): Command {
   });
 
   const stubs: Array<[string, string, string]> = [
-    ['update', 'incremental update (not provided)', 'Lifecycle'],
     ['context', 'layered context packets (not provided)', 'Query'],
     ['similar', 'similar API search (not provided)', 'Governance'],
     ['audit-duplicates', 'duplicate implementation audit (not provided)', 'Governance'],
@@ -1048,7 +1163,7 @@ export function buildProgram(): Command {
         throw nexusError('E24', `${name} is not provided`, {
           reason: 'this capability belongs to a later phase',
           suggestion:
-            'Phase 05 implements init, build, status, doctor, symbol, references, search, deps, api-*, impact, preflight, postflight and verify.',
+            'Phase 06 implements init, build, update, status, doctor, symbol, references, search, deps, api-*, impact, preflight, postflight and verify.',
         });
       });
     });
@@ -1083,7 +1198,7 @@ Compatibility aliases (not shown above):
   agents       -> print agents
   skill        -> print skill
 
-Phase 04 implements: init, build, status, doctor, symbol, references, search, deps, api-snapshot, api-diff.
+Phase 06 implements: init, build, update, status, doctor, symbol, references, search, deps, api-snapshot, api-diff, impact, preflight, postflight, verify.
 Other commands return E24 "not provided"; they never return fake data.
 `,
   );
