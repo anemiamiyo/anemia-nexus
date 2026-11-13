@@ -3,7 +3,8 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "anemia-core": ["packages/core/src/index.ts"]
+      "anemia-core": ["packages/core/src/index.ts"],
+      "anemia-mcp": ["packages/mcp/src/index.ts"]
     },
     "noEmit": true
   },

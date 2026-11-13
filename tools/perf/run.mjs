@@ -279,14 +279,64 @@ ensureProject();
   raw.P5 = durations;
 }
 
-// P7 MCP latency: the MCP server is Phase 07; record not-available, not a fake.
-results.push({
-  scenario: 'P7',
-  ...machine,
-  durationMs: null,
-  status: 'not-available',
-  reason: 'MCP server and refresh are Phase 07; no transport exists in Phase 06',
-});
+// P7 MCP request latency (real stdio server; initialize + status/search).
+{
+  const { Client } = await import('@modelcontextprotocol/client');
+  const { StdioClientTransport } = await import('@modelcontextprotocol/client/stdio');
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [CLI, 'mcp'],
+    cwd: project,
+    stderr: 'pipe',
+  });
+  const client = new Client({ name: 'nexus-perf', version: '0.0.0' });
+  let mcpError = null;
+  let p7Durations = [];
+  try {
+    await client.connect(transport);
+    await client.listTools();
+    await client.callTool({ name: 'status', arguments: {} });
+    await client.callTool({ name: 'search', arguments: { term: 'fn0_0', format: 'json' } });
+    for (let run = 0; run < 10; run += 1) {
+      const started = performance.now();
+      const result = await client.callTool({
+        name: 'search',
+        arguments: { term: 'fn0_0', format: 'json' },
+      });
+      if (result.isError === true) throw new Error('P7 MCP search returned isError');
+      p7Durations.push(performance.now() - started);
+    }
+  } catch (error) {
+    mcpError = error instanceof Error ? error.message : String(error);
+  } finally {
+    try {
+      await client.close();
+    } catch {
+      // best effort
+    }
+  }
+  if (mcpError !== null) {
+    results.push({
+      scenario: 'P7',
+      ...machine,
+      durationMs: null,
+      status: 'failed',
+      reason: mcpError,
+      failureMode: 'mcp-stdio',
+    });
+  } else {
+    results.push(
+      baseRecord('P7', Math.round(p95(p7Durations) * 100) / 100, {
+        p50Ms: Math.round(median(p7Durations) * 100) / 100,
+        p95Ms: Math.round(p95(p7Durations) * 100) / 100,
+        repetitions: p7Durations.length,
+        peakRssMB: null,
+        note: 'stdio child process + initialize + status/search calls; latency includes the server-side status scan',
+      }),
+    );
+    raw.P7 = p7Durations;
+  }
+}
 
 // P8 crash recovery: inject after-commit-before-flip, then time recovery.
 {
@@ -339,10 +389,11 @@ const payload = {
   results,
   raw,
   limitations: [
-    'P7 is not available before Phase 07 (no MCP transport).',
+    'P7 measures a real stdio MCP child (initialize + tools/list + status/search); it is not a not-available placeholder.',
     'P3/P4 measure a conservative root-level rebuild, not per-file AST reuse.',
     'Peak RSS is sampled in the build CLI process every 50ms; SCIP child RSS is not included.',
     'Generated projects have no node_modules, so dependencyCount is 0.',
+    '50k/300k/1M scales are not measured by this run; do not extrapolate.',
   ],
 };
 const text = `${JSON.stringify(payload, null, 2)}\n`;

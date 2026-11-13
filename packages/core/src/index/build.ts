@@ -75,6 +75,7 @@ import {
   computeRootWeights,
   orderRootsByDependencies,
   type DegradationFlags,
+  type ResourceSummary,
 } from '../scheduler.js';
 import {
   computeTsconfigHash,
@@ -145,12 +146,7 @@ export interface BuildResult {
   roots: RootBuildResult[];
   failedRoots: string[];
   totalMs: number;
-  resources?: {
-    budgetMB: number;
-    concurrency: number;
-    peakRssMBGlobal: number;
-    degradedStages: string[];
-  };
+  resources?: ResourceSummary;
   recovery?: {
     repaired: string[];
     invalid: string[];
@@ -177,12 +173,18 @@ export interface BuildOptions {
   /** Cancellation (docs/05-data-model.md 5.10.3). */
   signal?: AbortSignal;
   /** Coordinator snapshot for the manifest (set by buildWorkspace). */
-  resourceInfo?: {
-    budgetMB: number;
-    concurrency: number;
-    peakRssMBGlobal: number;
-    degradedStages: string[];
+  resourceInfo?: ResourceSummary;
+  /**
+   * MCP refresh guardrail (docs/14-agent-integration.md 14.1.1). When set, the
+   * whole update is rejected before any write if a selected root needs a full
+   * rebuild or the changed-file count exceeds the limit.
+   */
+  refreshGuard?: {
+    maxChangedFiles: number;
+    rejectFullRebuild?: boolean;
   };
+  /** Lock wait in ms; MCP refresh uses 0 to fail fast with E08 (14.1.1). */
+  lockWaitMs?: number;
 }
 
 interface RootAnalysis {
@@ -1521,6 +1523,50 @@ export async function buildWorkspace(options: BuildOptions): Promise<BuildResult
   const resultsByRoot = new Map<string, RootBuildResult>();
   let cancelled = false;
 
+  // Change plans are computed before any root is built so the refresh guard
+  // can reject the whole call without partial writes (14.1.1).
+  const changePlans = new Map<string, RootChangePlan | null>();
+  if (mode === 'update') {
+    for (const root of ordered) {
+      const effective = effectiveByRoot.get(root.rootId) as EffectiveRootConfig;
+      const currentFiles = scanFilesForChange(projectRoot, root, effective);
+      const plan = planRootChange(
+        {
+          rootId: root.rootId,
+          previousManifest: initialManifests.get(root.rootId) ?? null,
+          currentFiles,
+          currentConfigHash: effective.configHash,
+          currentTsconfigHash: computeTsconfigHash(
+            root.absolutePath,
+            root.tsconfigRelativePath ?? `${root.rootPath}/tsconfig.json`,
+          ),
+          currentIgnoreHash: effective.ignoreHash,
+          currentRootSetHash: rootSetHash,
+          forceFull: options.forceFull === true,
+          forcedGlobs: options.forcedGlobs,
+        },
+        projectRoot,
+      );
+      if (options.refreshGuard !== undefined && plan.mode !== 'fresh') {
+        if (plan.mode === 'full' && options.refreshGuard.rejectFullRebuild !== false) {
+          throw nexusError('E13', 'refresh cannot perform a full rebuild', {
+            reason: `root ${root.rootId} requires a full rebuild (${plan.reasons.join(', ')})`,
+            suggestion: 'Run `nex update` in a terminal; MCP refresh is incremental only.',
+            evidence: { rootId: root.rootId, reasons: plan.reasons },
+          });
+        }
+        if (plan.counts.total > options.refreshGuard.maxChangedFiles) {
+          throw nexusError('E13', 'refresh exceeds the changed-file limit', {
+            reason: `${plan.counts.total} changed files in root ${root.rootId}, limit ${options.refreshGuard.maxChangedFiles}`,
+            suggestion: 'Run `nex update` in a terminal.',
+            evidence: { rootId: root.rootId, changed: plan.counts.total },
+          });
+        }
+      }
+      changePlans.set(root.rootId, plan);
+    }
+  }
+
   for (const root of ordered) {
     const effective = effectiveByRoot.get(root.rootId) as EffectiveRootConfig;
     const rootStarted = Date.now();
@@ -1548,38 +1594,18 @@ export async function buildWorkspace(options: BuildOptions): Promise<BuildResult
     }
     emit(options, { type: 'root-start', rootId: root.rootId, message: root.rootPath });
 
-    let plan: RootChangePlan | null = null;
-    if (mode === 'update') {
-      const currentFiles = scanFilesForChange(projectRoot, root, effective);
-      plan = planRootChange(
-        {
-          rootId: root.rootId,
-          previousManifest: initialManifests.get(root.rootId) ?? null,
-          currentFiles,
-          currentConfigHash: effective.configHash,
-          currentTsconfigHash: computeTsconfigHash(
-            root.absolutePath,
-            root.tsconfigRelativePath ?? `${root.rootPath}/tsconfig.json`,
-          ),
-          currentIgnoreHash: effective.ignoreHash,
-          currentRootSetHash: rootSetHash,
-          forceFull: options.forceFull === true,
-          forcedGlobs: options.forcedGlobs,
-        },
-        projectRoot,
+    const plan: RootChangePlan | null = changePlans.get(root.rootId) ?? null;
+    if (mode === 'update' && plan !== null && plan.mode === 'fresh') {
+      resultsByRoot.set(
+        root.rootId,
+        skippedResult(root, initialManifests.get(root.rootId) ?? null, Date.now() - rootStarted),
       );
-      if (plan.mode === 'fresh') {
-        resultsByRoot.set(
-          root.rootId,
-          skippedResult(root, initialManifests.get(root.rootId) ?? null, Date.now() - rootStarted),
-        );
-        emit(options, {
-          type: 'root-done',
-          rootId: root.rootId,
-          message: 'fresh (no changes)',
-        });
-        continue;
-      }
+      emit(options, {
+        type: 'root-done',
+        rootId: root.rootId,
+        message: 'fresh (no changes)',
+      });
+      continue;
     }
 
     const flags = coordinator.flags();
@@ -1607,19 +1633,22 @@ export async function buildWorkspace(options: BuildOptions): Promise<BuildResult
 
     try {
       buildOptions.resourceInfo = coordinator.resourceSummary();
-      const outcome = await withRootLock(rootDirectory(projectRoot, root.rootId), async () =>
-        buildRoot({
-          root,
-          effective,
-          options: buildOptions,
-          sqliteVersion: sqliteProbe.version,
-          rootSetHash,
-          startedAt,
-          mode: plan?.mode === 'full' ? 'full' : mode === 'update' ? 'incremental' : 'full',
-          changePlan: plan,
-          flags,
-          gitCommit,
-        }),
+      const outcome = await withRootLock(
+        rootDirectory(projectRoot, root.rootId),
+        async () =>
+          buildRoot({
+            root,
+            effective,
+            options: buildOptions,
+            sqliteVersion: sqliteProbe.version,
+            rootSetHash,
+            startedAt,
+            mode: plan?.mode === 'full' ? 'full' : mode === 'update' ? 'incremental' : 'full',
+            changePlan: plan,
+            flags,
+            gitCommit,
+          }),
+        options.lockWaitMs,
       );
       const observed = coordinator.observePeak(root.rootId, outcome.peakRssMB);
       resultsByRoot.set(root.rootId, {

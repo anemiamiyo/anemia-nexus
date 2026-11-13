@@ -39,6 +39,7 @@ export interface CliContext {
   explain: boolean;
   noTruncate: boolean;
   budgetHint: number | null;
+  cursor: string | null;
   cursorOffset: number;
   outputFile: string | null;
   root: string | null;
@@ -184,6 +185,7 @@ export function createContext(options: RawGlobalOptions): CliContext {
     explain: options.explain === true,
     noTruncate: options.noTruncate === true,
     budgetHint,
+    cursor: options.cursor ?? null,
     cursorOffset: decodeCursor(options.cursor),
     outputFile: options.outputFile ?? null,
     root: options.root ?? null,

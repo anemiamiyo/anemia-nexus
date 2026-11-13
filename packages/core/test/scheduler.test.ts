@@ -8,6 +8,7 @@ import {
   buildWorkspace,
   computeResourceBudget,
   computeRootWeights,
+  detectAvailableMemoryMB,
   loadConfig,
   orderRootsByDependencies,
   type RootCandidate,
@@ -56,6 +57,93 @@ describe('global resource coordinator (5.10)', () => {
     });
     expect(squeezed.globalBudgetMB).toBe(500);
     expect(squeezed.concurrency).toBe(2);
+  });
+
+  it('derives an automatic budget from available memory instead of a fixed 900 MB', () => {
+    const roomy = computeResourceBudget({
+      config: { concurrency: 1 },
+      rootCount: 1,
+      availableMemMB: 16384,
+      cpuCores: 8,
+    });
+    expect(roomy.configuredMaxMemoryMB).toBeNull();
+    expect(roomy.source.auto).toBe(true);
+    expect(roomy.dynamicBudgetMB).toBe(8192);
+    expect(roomy.globalBudgetMB).toBe(8192);
+    expect(roomy.globalBudgetMB).toBeGreaterThan(900);
+
+    const tight = computeResourceBudget({
+      config: { concurrency: 1 },
+      rootCount: 1,
+      availableMemMB: 1000,
+      cpuCores: 8,
+    });
+    expect(tight.dynamicBudgetMB).toBe(500);
+    expect(tight.globalBudgetMB).toBe(500);
+
+    const tiny = computeResourceBudget({
+      config: { concurrency: 1 },
+      rootCount: 1,
+      availableMemMB: 100,
+      cpuCores: 8,
+    });
+    expect(tiny.globalBudgetMB).toBe(100);
+    expect(tiny.globalBudgetMB).toBeLessThanOrEqual(tiny.availableMemMB);
+  });
+
+  it('keeps an explicit cap but never exceeds half of available memory', () => {
+    const explicit = computeResourceBudget({
+      config: { maxMemoryMB: 900, concurrency: 1 },
+      rootCount: 1,
+      availableMemMB: 16384,
+      cpuCores: 8,
+    });
+    expect(explicit.configuredMaxMemoryMB).toBe(900);
+    expect(explicit.source.auto).toBe(false);
+    expect(explicit.globalBudgetMB).toBe(900);
+
+    const clamped = computeResourceBudget({
+      config: { maxMemoryMB: 2000, concurrency: 1 },
+      rootCount: 1,
+      availableMemMB: 1000,
+      cpuCores: 8,
+    });
+    expect(clamped.globalBudgetMB).toBe(500);
+    expect(clamped.source.configMaxMemoryMB).toBe(2000);
+  });
+
+  it('detects available memory without throwing', () => {
+    const detected = detectAvailableMemoryMB();
+    expect(Number.isInteger(detected.availableMemMB)).toBe(true);
+    expect(detected.availableMemMB).toBeGreaterThan(0);
+    expect(['process', 'os', 'fallback']).toContain(detected.detection);
+  });
+
+  it('records the dynamic budget source in the coordinator summary', () => {
+    const budget = computeResourceBudget({
+      config: { maxMemoryMB: 1000, concurrency: 2 },
+      rootCount: 2,
+      availableMemMB: 4000,
+      cpuCores: 8,
+    });
+    const roots = [
+      candidate('alpha', 'fixtures/F18-scheduler/packages/alpha', '@f18/alpha'),
+      candidate('beta', 'fixtures/F18-scheduler/packages/beta', '@f18/beta'),
+    ];
+    const coordinator = new GlobalResourceCoordinator({
+      budget,
+      weights: computeRootWeights({
+        roots,
+        previousPeakMB: new Map(),
+        globalBudgetMB: budget.globalBudgetMB,
+      }),
+    });
+    const summary = coordinator.resourceSummary();
+    expect(summary.availableMemMB).toBe(4000);
+    expect(summary.dynamicBudgetMB).toBe(2000);
+    expect(summary.configuredMaxMemoryMB).toBe(1000);
+    expect(summary.autoBudget).toBe(false);
+    expect(summary.effectiveBudgetMB).toBe(1000);
   });
 
   it('normalizes root weights from previous peak RSS', () => {

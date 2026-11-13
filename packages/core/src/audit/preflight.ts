@@ -74,6 +74,7 @@ export interface PreflightData {
   failedRoots: string[];
   completeness: 'complete' | 'partial';
   warnings: Array<{ code: string; message: string; severity: 'warning' | 'error' }>;
+  degraded: string[];
   notes: string[];
   exitCode: number;
 }
@@ -152,6 +153,7 @@ function extractionLookup(
 export async function runPreflight(options: PreflightOptions): Promise<PreflightData> {
   const context = await prepareContext(options);
   const selection = selectScope(context, options);
+  const degraded = [...new Set(selection.roots.flatMap((root) => root.degraded))].sort();
   const task = options.task ?? null;
   const targetArg = options.target ?? '';
   const symbolArg = options.symbol ?? null;
@@ -193,6 +195,7 @@ export async function runPreflight(options: PreflightOptions): Promise<Preflight
         staleness: 'stale',
         buildFingerprint: null,
         budget: { maxTokens: context.budget.maxTokens, maxFiles: context.budget.maxFiles },
+        degraded,
       });
       return {
         command: 'preflight',
@@ -225,6 +228,7 @@ export async function runPreflight(options: PreflightOptions): Promise<Preflight
         failedRoots: selection.failedRoots,
         completeness: 'partial',
         warnings: context.warnings,
+        degraded,
         notes,
         exitCode: 2,
       };
@@ -356,6 +360,7 @@ export async function runPreflight(options: PreflightOptions): Promise<Preflight
     staleness: impactReport.staleness as string,
     buildFingerprint: impactReport.buildFingerprint as string | null,
     budget: { maxTokens: context.budget.maxTokens, maxFiles: context.budget.maxFiles },
+    degraded,
   });
 
   const notes = [...impact.notes];
@@ -401,6 +406,7 @@ export async function runPreflight(options: PreflightOptions): Promise<Preflight
     failedRoots: selection.failedRoots,
     completeness: impact.completeness,
     warnings: [...context.warnings, ...impact.warnings],
+    degraded,
     notes,
     exitCode: impact.completeness === 'complete' || !extraction.names.failed ? 0 : 2,
   };

@@ -21,23 +21,93 @@ export const DEGRADATION_LADDER = [
 export type DegradationStage = (typeof DEGRADATION_LADDER)[number];
 
 export interface ResourceConfig {
-  maxMemoryMB: number;
+  /** Explicit global budget in MB. Absent means "derive from available memory". */
+  maxMemoryMB?: number;
   concurrency: number;
 }
 
 export interface ResourceBudget {
   globalBudgetMB: number;
   availableMemMB: number;
+  dynamicBudgetMB: number;
+  configuredMaxMemoryMB: number | null;
   cpuCores: number;
   concurrency: number;
   source: {
-    configMaxMemoryMB: number;
+    auto: boolean;
+    configMaxMemoryMB: number | null;
     configConcurrency: number;
     availableHalfMB: number;
+    detection: 'process' | 'os' | 'fallback';
   };
 }
 
 const MIN_ROOT_BUDGET_MB = 64;
+const MIN_DYNAMIC_BUDGET_MB = 128;
+const FALLBACK_BUDGET_MB = 900;
+
+export interface ResourceSummary {
+  budgetMB: number;
+  effectiveBudgetMB: number;
+  availableMemMB: number;
+  dynamicBudgetMB: number;
+  configuredMaxMemoryMB: number | null;
+  autoBudget: boolean;
+  concurrency: number;
+  peakRssMBGlobal: number;
+  degradedStages: string[];
+}
+
+/**
+ * 5.10.3 budget source. Node 22.16 exposes `process.availableMemory()` and
+ * `process.constrainedMemory()`; the latter reports a positive cgroup/container
+ * limit. The effective free-memory figure is the smaller of the two. If the
+ * APIs are unavailable or report nonsense, fall back to `os.freemem()` and
+ * finally to the documented 900 MB baseline. This function never throws.
+ */
+export function detectAvailableMemoryMB(): {
+  availableMemMB: number;
+  detection: 'process' | 'os' | 'fallback';
+} {
+  const fromProcess = (): number | null => {
+    try {
+      const processLike = process as unknown as {
+        availableMemory?: () => unknown;
+        constrainedMemory?: () => unknown;
+      };
+      const available =
+        typeof processLike.availableMemory === 'function' ? processLike.availableMemory() : null;
+      const constrained =
+        typeof processLike.constrainedMemory === 'function'
+          ? processLike.constrainedMemory()
+          : null;
+      const candidates: number[] = [];
+      if (typeof available === 'number' && Number.isFinite(available) && available > 0) {
+        candidates.push(available);
+      }
+      if (typeof constrained === 'number' && Number.isFinite(constrained) && constrained > 0) {
+        candidates.push(constrained);
+      }
+      if (candidates.length === 0) return null;
+      return Math.floor(Math.min(...candidates) / (1024 * 1024));
+    } catch {
+      return null;
+    }
+  };
+  const fromProcessMB = fromProcess();
+  if (fromProcessMB !== null && fromProcessMB > 0) {
+    return { availableMemMB: fromProcessMB, detection: 'process' };
+  }
+  try {
+    const free = Math.floor(os.freemem() / (1024 * 1024));
+    if (Number.isFinite(free) && free > 0) {
+      return { availableMemMB: free, detection: 'os' };
+    }
+  } catch {
+    // fall through
+  }
+  return { availableMemMB: FALLBACK_BUDGET_MB * 2, detection: 'fallback' };
+}
 
 export function computeResourceBudget(input: {
   config: ResourceConfig;
@@ -46,14 +116,30 @@ export function computeResourceBudget(input: {
   availableMemMB?: number;
   cpuCores?: number;
 }): ResourceBudget {
-  const availableMemMB =
-    input.availableMemMB ?? Math.max(0, Math.floor(os.freemem() / (1024 * 1024)));
+  const detected =
+    input.availableMemMB !== undefined
+      ? {
+          availableMemMB: Math.max(0, Math.floor(input.availableMemMB)),
+          detection: 'process' as const,
+        }
+      : detectAvailableMemoryMB();
+  const availableMemMB = detected.availableMemMB;
   const cpuCores = input.cpuCores ?? Math.max(1, os.cpus().length);
-  const availableHalfMB = Math.floor(availableMemMB * 0.5);
-  const globalBudgetMB =
-    availableHalfMB > 0
-      ? Math.min(input.config.maxMemoryMB, availableHalfMB)
-      : input.config.maxMemoryMB;
+  const configured = input.config.maxMemoryMB ?? null;
+  const availableHalfMB = availableMemMB > 0 ? Math.floor(availableMemMB * 0.5) : 0;
+
+  let dynamicBudgetMB: number;
+  let globalBudgetMB: number;
+  if (availableMemMB <= 0) {
+    dynamicBudgetMB = FALLBACK_BUDGET_MB;
+    globalBudgetMB = configured ?? FALLBACK_BUDGET_MB;
+  } else {
+    // Never exceed free memory: clamp the 128 MB floor for very small hosts.
+    dynamicBudgetMB = Math.min(availableMemMB, Math.max(MIN_DYNAMIC_BUDGET_MB, availableHalfMB));
+    globalBudgetMB =
+      configured === null ? dynamicBudgetMB : Math.min(configured, Math.max(1, availableHalfMB));
+  }
+
   const estimate = Math.max(
     MIN_ROOT_BUDGET_MB,
     input.estimatedPeakMB ?? Math.floor(globalBudgetMB / Math.max(1, input.rootCount)),
@@ -67,12 +153,16 @@ export function computeResourceBudget(input: {
   return {
     globalBudgetMB,
     availableMemMB,
+    dynamicBudgetMB,
+    configuredMaxMemoryMB: configured,
     cpuCores,
     concurrency,
     source: {
-      configMaxMemoryMB: input.config.maxMemoryMB,
+      auto: configured === null,
+      configMaxMemoryMB: configured,
       configConcurrency: input.config.concurrency,
       availableHalfMB,
+      detection: detected.detection,
     },
   };
 }
@@ -276,14 +366,14 @@ export class GlobalResourceCoordinator {
     return this.level >= DEGRADATION_LADDER.length;
   }
 
-  resourceSummary(): {
-    budgetMB: number;
-    concurrency: number;
-    peakRssMBGlobal: number;
-    degradedStages: string[];
-  } {
+  resourceSummary(): ResourceSummary {
     return {
       budgetMB: this.globalBudgetMB,
+      effectiveBudgetMB: this.globalBudgetMB,
+      availableMemMB: this.budget.availableMemMB,
+      dynamicBudgetMB: this.budget.dynamicBudgetMB,
+      configuredMaxMemoryMB: this.budget.configuredMaxMemoryMB,
+      autoBudget: this.budget.source.auto,
       concurrency: this.concurrency,
       peakRssMBGlobal: Math.max(0, ...this.peaks.values()),
       degradedStages: [...this.currentStages()],

@@ -54,7 +54,13 @@ export type {
   RootBuildResult,
 } from './index/build.js';
 export { SCHEMA_VERSION as BUILD_SCHEMA_VERSION } from './index/fingerprint.js';
-export { statusReport, verifyFreshness, findActiveRoot, CAPABILITIES } from './status.js';
+export {
+  statusReport,
+  verifyFreshness,
+  findActiveRoot,
+  CAPABILITIES,
+  buildOnboarding,
+} from './status.js';
 export type {
   StatusReport,
   StatusOptions,
@@ -63,9 +69,13 @@ export type {
   WarningItem,
   ConfigStatus,
   VerifyFreshnessInput,
+  OnboardingInfo,
+  OnboardingCandidate,
 } from './status.js';
 export { runDoctor, unsupportedDoctorFlag } from './doctor.js';
 export type { DoctorReport, DoctorCheck, DoctorOptions, CheckStatus } from './doctor.js';
+export { runDoctorRepair } from './doctor-repair.js';
+export type { RepairAction, RepairReport, DoctorRepairOptions } from './doctor-repair.js';
 export { dumpVueMap } from './vue/dump.js';
 export { querySymbol, queryReferences, querySearch, queryDependencies } from './query/service.js';
 export type {
@@ -100,6 +110,7 @@ export type {
 } from './store/state.js';
 export { recoverRoot, recoverWorkspace } from './store/recovery.js';
 export type { RecoveryOutcome, RecoveryResult, WorkspaceRecoveryResult } from './store/recovery.js';
+export { findLiveRootLock } from './store/lock.js';
 export {
   readWorkspace,
   writeWorkspaceAtomic,
@@ -128,12 +139,14 @@ export {
   GlobalResourceCoordinator,
   computeResourceBudget,
   computeRootWeights,
+  detectAvailableMemoryMB,
   orderRootsByDependencies,
   DEGRADATION_LADDER,
 } from './scheduler.js';
 export type {
   ResourceConfig,
   ResourceBudget,
+  ResourceSummary,
   RootWeight,
   DegradationFlags,
   DegradationStage,
@@ -185,9 +198,22 @@ export {
   extractSymbolNames,
   scoreCandidate,
   parseSignature,
+  normalizeType,
   SIMILARITY_RULES_VERSION,
 } from './audit/similar.js';
 export type { SimilarityCandidate, SimilarityBreakdown, SignatureParts } from './audit/similar.js';
+export { runSimilar } from './audit/similar-service.js';
+export type { SimilarData, SimilarOptions, SimilarTarget } from './audit/similar-service.js';
+export { runAuditDuplicates } from './audit/duplicates.js';
+export type {
+  DuplicateDifference,
+  DuplicateGroup,
+  DuplicateMember,
+  DuplicateOptions,
+  DuplicatesData,
+} from './audit/duplicates.js';
+export { runContext } from './audit/context-service.js';
+export type { ContextOptions } from './audit/context-service.js';
 export { probeSqlite } from './store/db.js';
 export type {
   Coverage,

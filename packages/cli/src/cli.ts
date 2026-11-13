@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createInterface } from 'node:readline';
 
 import {
   buildWorkspace,
@@ -9,6 +10,7 @@ import {
   isNexusError,
   loadConfig,
   runDoctor,
+  runDoctorRepair,
   runInit,
   dumpVueMap,
   queryReferences,
@@ -21,6 +23,9 @@ import {
   runPreflight,
   runPostflight,
   runVerify,
+  runSimilar,
+  runAuditDuplicates,
+  runContext,
   type BuildProgressEvent,
   writeBaselineSnapshot,
   diffCurrentSurface,
@@ -29,9 +34,20 @@ import {
   type QueryEnvelope,
   type StatusReport,
 } from 'anemia-core';
+import { startMcpServer } from 'anemia-mcp';
 import { Command, CommanderError } from 'commander';
 
 import { BOOLEAN_FLAGS, createContext, type CliContext, type OutputFormat } from './context.js';
+import {
+  agentsAsset,
+  clientTarget,
+  isPrintAsset,
+  isPrintClient,
+  mcpConfigAsset,
+  skillAsset,
+  type PrintAsset,
+} from './assets.js';
+import { probeMcpServer, withProbeDirectory } from './mcp-probe.js';
 import { PACKAGE_NAME, PACKAGE_VERSION, versionText } from './version.js';
 import { renderError, renderOutput } from './render.js';
 
@@ -214,6 +230,16 @@ function addExamples(command: Command, examples: readonly string[]): Command {
   );
 }
 
+function confirmRepair(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    rl.question('Repair .nexus/ derived data only? [y/N] ', (answer) => {
+      rl.close();
+      resolve(/^y(es)?$/i.test(answer.trim()));
+    });
+  });
+}
+
 function versionString(context: { projectRoot: string }): string {
   let suffix = '';
   try {
@@ -273,6 +299,42 @@ export function buildProgram(): Command {
 
   program.configureHelp({ sortSubcommands: false, sortOptions: false });
   program.showSuggestionAfterError(true);
+
+  const emitPrint = (
+    context: CliContext,
+    asset: PrintAsset,
+    clientValue: unknown,
+  ): ActionOutcome => {
+    if (context.outputFile !== null) {
+      throw nexusError('E00', 'print never writes files', {
+        reason: '--output-file was provided, but integration assets are stdout-only',
+        suggestion: 'Redirect stdout yourself if you need a file.',
+      });
+    }
+    const clientRaw = clientValue === undefined ? 'dsh' : clientValue;
+    if (asset === 'mcp-config') {
+      if (typeof clientRaw !== 'string' || !isPrintClient(clientRaw)) {
+        throw nexusError('E00', 'invalid --client value', {
+          reason: `expected dsh, claude or cursor, received ${JSON.stringify(clientRaw)}`,
+          suggestion: 'Use --client dsh|claude|cursor.',
+        });
+      }
+      process.stdout.write(mcpConfigAsset(clientRaw));
+      if (!context.quiet) {
+        writeStderr(`Merge this JSON into ${clientTarget(clientRaw)}; nothing was written.`);
+      }
+    } else {
+      if (clientValue !== undefined) {
+        throw nexusError('E00', '--client is only valid with mcp-config', {
+          reason: `received --client ${JSON.stringify(clientValue)} for ${asset}`,
+          suggestion: `Run \`nex print ${asset}\` without --client.`,
+        });
+      }
+      process.stdout.write(asset === 'agents' ? agentsAsset() : skillAsset());
+      if (!context.quiet) writeStderr('Printed to stdout only; nothing was written.');
+    }
+    return { data: {}, exitCode: 0, skipRender: true };
+  };
 
   const init = addExamples(
     program
@@ -518,9 +580,10 @@ export function buildProgram(): Command {
     await execute(command, async (context) => {
       const opts = command.optsWithGlobals() as Record<string, unknown>;
       if (opts.jsonSchema === true) {
-        throw nexusError('E24', 'status output schema is not provided in Phase 01', {
-          reason: 'the versioned status JSON Schema arrives with the full output contract',
-          suggestion: 'Use `nex doctor --schema` for the configuration schema.',
+        throw nexusError('E24', 'status output schema is not provided', {
+          reason: 'the versioned status JSON Schema is not part of the Phase 07 deliverable',
+          suggestion:
+            'Use `nex status --format json` for the current shape, or `nex doctor --schema` for the configuration schema.',
         });
       }
       const report = await statusReport({
@@ -542,6 +605,7 @@ export function buildProgram(): Command {
           self: report.self,
           config: report.config,
           guidance: report.guidance,
+          onboarding: report.onboarding,
           warnings: report.warnings,
           projectRoot: report.projectRoot,
           truncated: false,
@@ -561,19 +625,69 @@ export function buildProgram(): Command {
       .description('diagnose environment, configuration, database and consistency')
       .helpGroup('Lifecycle')
       .option('--schema', 'print the configuration JSON Schema')
-      .option('--mcp', 'MCP diagnostics (not provided)')
+      .option('--mcp', 'probe the real MCP server handshake and tools/list')
       .option('--dump-vue-map <file>', 'print the Vue projection and offset mapping')
-      .option('--repair', 'repair Nexus data (not provided)'),
-    ['nex doctor', 'nex doctor --schema'],
+      .option('--repair', 'repair .nexus/ derived data (requires --yes in non-TTY)'),
+    ['nex doctor', 'nex doctor --schema', 'nex doctor --repair --yes', 'nex doctor --mcp'],
   );
   doctor.action(async (_options, command: Command) => {
     await execute(command, async (context) => {
       const opts = command.optsWithGlobals() as Record<string, unknown>;
-      if (opts.mcp === true) {
-        throw nexusError('E24', 'doctor --mcp is not provided in Phase 01', {
-          reason: 'MCP diagnostics arrive with the MCP server in Phase 07',
-          suggestion: 'Use `nex status` for indexing state.',
+      const modeCount = [
+        opts.schema === true,
+        opts.mcp === true,
+        opts.repair === true,
+        typeof opts.dumpVueMap === 'string',
+      ].filter(Boolean).length;
+      if (modeCount > 1) {
+        throw nexusError('E00', 'doctor modes are mutually exclusive', {
+          reason: '--schema, --mcp, --repair and --dump-vue-map cannot be combined',
+          suggestion: 'Run one doctor mode at a time.',
         });
+      }
+      if (opts.mcp === true) {
+        const entry = process.argv[1] ?? '';
+        const probe = await withProbeDirectory((cwd) =>
+          probeMcpServer({ entry, cwd, timeoutMs: 20_000 }),
+        );
+        const check = {
+          id: 'mcp',
+          title: 'MCP server handshake',
+          status: probe.ok ? ('pass' as const) : ('fail' as const),
+          detail: `protocol=${probe.protocolVersion ?? 'unknown'} tools=${probe.tools.length} durationMs=${probe.durationMs}`,
+          suggestion: probe.ok
+            ? null
+            : 'Run `nex mcp` manually and inspect stderr; the probe uses an isolated temporary project.',
+          evidence: {
+            protocolVersion: probe.protocolVersion,
+            tools: probe.tools,
+            durationMs: probe.durationMs,
+            stderr: probe.stderr.slice(0, 2000),
+          },
+        };
+        const summary = {
+          pass: probe.ok ? 1 : 0,
+          warn: 0,
+          fail: probe.ok ? 0 : 1,
+        };
+        return {
+          data: {
+            command: 'doctor',
+            checks: [check],
+            summary,
+            roots: [],
+            schema: null,
+            counts: emptyCounts(1),
+            coverage: emptyCoverage(),
+            truncated: false,
+            nextCursor: null,
+            staleness: probe.ok ? 'fresh' : 'stale',
+            buildFingerprint: null,
+            degraded: [],
+            notes: ['MCP probe only performs initialize + tools/list; it never calls refresh'],
+          },
+          exitCode: probe.ok ? 0 : 1,
+        };
       }
       if (typeof opts.dumpVueMap === 'string') {
         const dump = dumpVueMap({
@@ -584,10 +698,66 @@ export function buildProgram(): Command {
         return { data: {}, exitCode: 0, skipRender: true };
       }
       if (opts.repair === true) {
-        throw nexusError('E24', 'doctor --repair is not provided in Phase 01', {
-          reason: 'Phase 01 doctor is read-only',
-          suggestion: 'Delete the root index and rebuild; data is a derived artifact.',
+        if (!context.yes) {
+          if (!context.isTTY || context.nonInteractive) {
+            throw nexusError('E00', 'doctor --repair requires --yes in non-interactive mode', {
+              reason: 'repair is destructive and no confirmation was possible',
+              suggestion: 'Re-run with `nex doctor --repair --yes`.',
+            });
+          }
+          const confirmed = await confirmRepair();
+          if (!confirmed) {
+            return {
+              data: {
+                command: 'doctor',
+                checks: [],
+                summary: { pass: 0, warn: 0, fail: 0 },
+                roots: [],
+                schema: null,
+                repair: { skipped: true, actions: [] },
+                counts: emptyCounts(0),
+                coverage: emptyCoverage(),
+                truncated: false,
+                nextCursor: null,
+                staleness: 'fresh',
+                buildFingerprint: null,
+                degraded: [],
+                notes: ['repair was not confirmed; nothing was written'],
+              },
+              exitCode: 0,
+            };
+          }
+        }
+        const repair = await runDoctorRepair({
+          projectRoot: context.projectRoot,
+          trustConfig: context.trustConfig,
         });
+        return {
+          data: {
+            command: 'doctor',
+            checks: repair.doctor.checks,
+            summary: repair.doctor.summary,
+            roots: repair.doctor.roots,
+            schema: null,
+            repair: {
+              actions: repair.actions,
+              recovery: repair.recovery,
+              workspace: repair.workspace,
+              removedOrphans: repair.removedOrphans,
+            },
+            counts: emptyCounts(repair.doctor.checks.length),
+            coverage: emptyCoverage(),
+            truncated: false,
+            nextCursor: null,
+            staleness: repair.exitCode === 0 ? 'fresh' : 'stale',
+            buildFingerprint: null,
+            degraded: [],
+            notes: [
+              'repair only touches .nexus/ derived data; source and configuration are unchanged',
+            ],
+          },
+          exitCode: repair.exitCode,
+        };
       }
       if (opts.schema === true) {
         const report = await runDoctor({ projectRoot: context.projectRoot, schemaOnly: true });
@@ -1143,12 +1313,247 @@ export function buildProgram(): Command {
     });
   });
 
+  const contextCommand = addExamples(
+    program
+      .command('context [target]')
+      .description('layered task context: summary, relations and source excerpt')
+      .helpGroup('Query')
+      .option('--task <text>', 'task description used to extract a target')
+      .option('--symbol <name>', 'analyze a symbol instead of a file path')
+      .option('--depth <n>', 'relation depth (default 3)')
+      .option('--context-lines <n>', 'include a source excerpt of the target (0-400)'),
+    [
+      'nex context src/core/useOverlay.ts --context-lines 20',
+      'nex context --task "add a close button" --depth 2',
+      'nex context --symbol useOverlay --format json',
+    ],
+  );
+  contextCommand.action(async (target: string | undefined, _options, command: Command) => {
+    await execute(command, async (context) => {
+      const opts = command.optsWithGlobals() as Record<string, unknown>;
+      const positive = (value: unknown, name: string, max = 400): number | undefined => {
+        if (value === undefined) return undefined;
+        const parsed = Number.parseInt(String(value), 10);
+        if (!Number.isInteger(parsed) || parsed < 0 || parsed > max) {
+          throw nexusError('E00', `${name} must be an integer between 0 and ${max}`, {
+            reason: `received ${JSON.stringify(value)}`,
+            suggestion: `Use ${name} 0..${max}.`,
+          });
+        }
+        return parsed;
+      };
+      const parsed = await runContext({
+        projectRoot: context.projectRoot,
+        cwd: context.cwd,
+        rootId: context.root,
+        roots: context.roots,
+        trustConfig: context.trustConfig,
+        task: typeof opts.task === 'string' ? opts.task : null,
+        target: target ?? null,
+        symbol: typeof opts.symbol === 'string' ? opts.symbol : null,
+        depth: positive(opts.depth, '--depth', 10),
+        contextLines: positive(opts.contextLines, '--context-lines', 400),
+        cursor: context.cursor,
+        noTruncate: context.noTruncate,
+      });
+      const degraded = Array.isArray(parsed.degraded) ? parsed.degraded : [];
+      return {
+        data: {
+          ...parsed,
+          command: 'context',
+          degraded,
+          notes: parsed.notes,
+        },
+        exitCode: parsed.staleness === 'fresh' ? 0 : 2,
+      };
+    });
+  });
+
+  const similar = addExamples(
+    program
+      .command('similar <query>')
+      .description('deterministic similar-API search (heuristic, explainable rules)')
+      .helpGroup('Governance')
+      .option('--top <n>', 'maximum candidates (1-50, default 10)')
+      .option('--scope <scope>', 'public|all (default all)'),
+    [
+      'nex similar useOverlay',
+      'nex similar "load user profile" --top 5',
+      'nex similar s_7f3k9m2q1x8b4c6d --scope public --explain',
+    ],
+  );
+  similar.action(async (query: string, _options, command: Command) => {
+    await execute(command, async (context) => {
+      const opts = command.optsWithGlobals() as Record<string, unknown>;
+      let top: number | undefined;
+      if (opts.top !== undefined) {
+        const parsed = Number.parseInt(String(opts.top), 10);
+        if (!Number.isInteger(parsed) || parsed < 1 || parsed > 50) {
+          throw nexusError('E00', '--top must be an integer between 1 and 50', {
+            reason: `received ${JSON.stringify(opts.top)}`,
+            suggestion: 'Use --top 1..50.',
+          });
+        }
+        top = parsed;
+      }
+      const scope = typeof opts.scope === 'string' ? opts.scope : 'all';
+      if (scope !== 'public' && scope !== 'all') {
+        throw nexusError('E00', 'invalid --scope value', {
+          reason: `expected public or all, received ${JSON.stringify(scope)}`,
+          suggestion: 'Use --scope public|all.',
+        });
+      }
+      const data = await runSimilar(
+        {
+          projectRoot: context.projectRoot,
+          cwd: context.cwd,
+          rootId: context.root,
+          roots: context.roots,
+          trustConfig: context.trustConfig,
+          top,
+          scope,
+          explain: context.explain,
+        },
+        query,
+      );
+      return { data: { ...data, command: 'similar' }, exitCode: 0 };
+    });
+  });
+
+  const auditDuplicates = addExamples(
+    program
+      .command('audit-duplicates')
+      .description('report duplicate and near-duplicate implementations (heuristic only)')
+      .helpGroup('Governance')
+      .option('--threshold <n>', 'similarity threshold 0..1 (default 0.8)')
+      .option('--scope <scope>', 'public|all (default all)'),
+    [
+      'nex audit-duplicates',
+      'nex audit-duplicates --threshold 0.9 --scope public',
+      'nex audit-duplicates --threshold 0.55 --format json',
+    ],
+  );
+  auditDuplicates.action(async (_options, command: Command) => {
+    await execute(command, async (context) => {
+      const opts = command.optsWithGlobals() as Record<string, unknown>;
+      let threshold: number | undefined;
+      if (opts.threshold !== undefined) {
+        const parsed =
+          typeof opts.threshold === 'number'
+            ? opts.threshold
+            : Number.parseFloat(String(opts.threshold));
+        if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+          throw nexusError('E00', '--threshold must be a number between 0 and 1', {
+            reason: `received ${JSON.stringify(opts.threshold)}`,
+            suggestion: 'Use --threshold 0..1 (default 0.8).',
+          });
+        }
+        threshold = parsed;
+      }
+      const scope = typeof opts.scope === 'string' ? opts.scope : 'all';
+      if (scope !== 'public' && scope !== 'all') {
+        throw nexusError('E00', 'invalid --scope value', {
+          reason: `expected public or all, received ${JSON.stringify(scope)}`,
+          suggestion: 'Use --scope public|all.',
+        });
+      }
+      const data = await runAuditDuplicates({
+        projectRoot: context.projectRoot,
+        cwd: context.cwd,
+        rootId: context.root,
+        roots: context.roots,
+        trustConfig: context.trustConfig,
+        threshold,
+        scope,
+      });
+      const lowThreshold = data.warnings.some((warning) => warning.message.includes('below 0.6'));
+      return {
+        data: { ...data, command: 'audit-duplicates' },
+        exitCode: data.groups.length > 0 || lowThreshold ? 2 : 0,
+      };
+    });
+  });
+
+  const mcp = addExamples(
+    program
+      .command('mcp')
+      .description('start the MCP server over stdio (8 tools; refresh is the only writer)')
+      .helpGroup('Access')
+      .option('--watch', 'watch files and refresh the index incrementally')
+      .option('--read-only', 'never write the index; refresh is not registered')
+      .option('--auto-bootstrap', 'build the index in the background when it is missing'),
+    ['nex mcp', 'nex mcp --watch', 'nex mcp --read-only'],
+  );
+  mcp.action(async (_options, command: Command) => {
+    await execute(command, async (context) => {
+      const opts = command.optsWithGlobals() as Record<string, unknown>;
+      const watch = opts.watch === true;
+      const readOnly = opts.readOnly === true;
+      const autoBootstrap = opts.autoBootstrap === true;
+      if (readOnly && watch) {
+        throw nexusError('E00', '--read-only cannot be combined with --watch', {
+          reason: 'watch refreshes the index and is a write path',
+          suggestion: 'Use either --read-only or --watch.',
+        });
+      }
+      if (readOnly && autoBootstrap) {
+        throw nexusError('E00', '--read-only cannot be combined with --auto-bootstrap', {
+          reason: 'auto-bootstrap writes an index',
+          suggestion: 'Use either --read-only or --auto-bootstrap.',
+        });
+      }
+      const self = selfInfo(context);
+      const started = await startMcpServer({
+        projectRoot: context.projectRoot,
+        cwd: context.cwd,
+        trustConfig: context.trustConfig,
+        readOnly,
+        watch,
+        autoBootstrap,
+        binaryPath: self.binaryPath,
+        serverVersion: PACKAGE_VERSION,
+        packageName: PACKAGE_NAME,
+      });
+      let closing = false;
+      const shutdown = async (): Promise<void> => {
+        if (closing) return;
+        closing = true;
+        try {
+          await started.close();
+        } finally {
+          process.exit(0);
+        }
+      };
+      process.once('SIGINT', () => void shutdown());
+      process.once('SIGTERM', () => void shutdown());
+      return { data: {}, exitCode: 0, skipRender: true };
+    });
+  });
+
+  const print = addExamples(
+    program
+      .command('print <asset>')
+      .description(
+        'print integration assets to stdout (mcp-config | agents | skill; never writes files)',
+      )
+      .helpGroup('Access')
+      .option('--client <client>', 'mcp-config target: dsh | claude | cursor'),
+    ['nex print mcp-config --client dsh', 'nex print agents', 'nex print skill'],
+  );
+  print.action(async (asset: string, _options, command: Command) => {
+    await execute(command, async (context) => {
+      if (!isPrintAsset(asset)) {
+        throw nexusError('E00', 'unknown print asset', {
+          reason: `expected mcp-config, agents or skill, received ${JSON.stringify(asset)}`,
+          suggestion: 'Use `nex print mcp-config|agents|skill`.',
+        });
+      }
+      const opts = command.optsWithGlobals() as Record<string, unknown>;
+      return emitPrint(context, asset, opts.client);
+    });
+  });
+
   const stubs: Array<[string, string, string]> = [
-    ['context', 'layered context packets (not provided)', 'Query'],
-    ['similar', 'similar API search (not provided)', 'Governance'],
-    ['audit-duplicates', 'duplicate implementation audit (not provided)', 'Governance'],
-    ['print', 'print integration assets (not provided)', 'Access'],
-    ['mcp', 'MCP server (not provided)', 'Access'],
     ['test', 'fixture and consistency tests (not provided)', 'Test'],
   ];
   for (const [name, description, group] of stubs) {
@@ -1163,7 +1568,7 @@ export function buildProgram(): Command {
         throw nexusError('E24', `${name} is not provided`, {
           reason: 'this capability belongs to a later phase',
           suggestion:
-            'Phase 06 implements init, build, update, status, doctor, symbol, references, search, deps, api-*, impact, preflight, postflight and verify.',
+            'Phase 07 does not provide `nex test`; use `npm test` for the repository test suite, or `nex doctor` for diagnosis.',
         });
       });
     });
@@ -1177,14 +1582,13 @@ export function buildProgram(): Command {
     const alias = program
       .command(`${name} [args...]`, { hidden: true })
       .description(`compatibility alias for print ${asset}`)
+      .option('--client <client>', 'mcp-config target: dsh | claude | cursor')
       .allowUnknownOption(true)
       .allowExcessArguments(true);
     alias.action(async (_args: string[], _options, command: Command) => {
-      await execute(command, async () => {
-        throw nexusError('E24', `print ${asset} is not provided in Phase 01`, {
-          reason: 'integration materials arrive in Phase 07',
-          suggestion: 'No integration asset is generated by this build.',
-        });
+      await execute(command, async (context) => {
+        const opts = command.optsWithGlobals() as Record<string, unknown>;
+        return emitPrint(context, asset, opts.client);
       });
     });
   }
@@ -1198,7 +1602,7 @@ Compatibility aliases (not shown above):
   agents       -> print agents
   skill        -> print skill
 
-Phase 06 implements: init, build, update, status, doctor, symbol, references, search, deps, api-snapshot, api-diff, impact, preflight, postflight, verify.
+Phase 07 implements: init, build, update, status, doctor, symbol, references, search, deps, api-snapshot, api-diff, impact, preflight, postflight, verify, context, similar, audit-duplicates, print, mcp.
 Other commands return E24 "not provided"; they never return fake data.
 `,
   );

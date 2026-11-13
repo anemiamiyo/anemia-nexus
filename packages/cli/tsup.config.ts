@@ -27,6 +27,7 @@ export default defineConfig({
     'node:url',
     'node:util',
     'anemia-core',
+    'anemia-mcp',
     'commander',
   ],
 });

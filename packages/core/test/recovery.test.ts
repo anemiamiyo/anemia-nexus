@@ -37,15 +37,14 @@ function copyProject(source: string, label: string): string {
   return destination;
 }
 
-function crashBuild(project: string, point: string): number {
-  const result = spawnSync(process.execPath, ['--import', 'tsx', CHILD], {
+function crashBuild(project: string, point: string) {
+  return spawnSync(process.execPath, ['--import', 'tsx', CHILD], {
     cwd: project,
     env: { ...process.env, NEXUS_CRASH_AT: point },
     encoding: 'utf8',
-    timeout: 120_000,
+    timeout: 300_000,
     windowsHide: true,
   });
-  return result.status ?? 1;
 }
 
 describe('F16 crash recovery (12.3.3)', () => {
@@ -68,8 +67,16 @@ describe('F16 crash recovery (12.3.3)', () => {
     for (const [point, expected] of expectations) {
       const project = copyProject(fixture.directory, `f16-${point}`);
       directories.push(project);
-      const exit = crashBuild(project, point);
-      expect(exit, `${point} must terminate abnormally`).not.toBe(0);
+      const crash = crashBuild(project, point);
+      expect(crash.error, `${point} must not time out`).toBeUndefined();
+      if (process.platform === 'win32') {
+        expect(crash.error, `${point} must not time out`).toBeUndefined();
+        expect(crash.status ?? 1, `${point} must terminate abnormally`).not.toBe(0);
+      } else {
+        // A build failure would also be non-zero; only SIGKILL proves the
+        // requested injection point was reached.
+        expect(crash.signal, `${point} must be killed at the injection point`).toBe('SIGKILL');
+      }
       const recovery = recoverWorkspace(project);
       const result = recovery.roots.find((entry) => entry.rootId === fixture.rootId);
       expect(result?.outcome, point).toBe(expected);

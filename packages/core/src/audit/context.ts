@@ -14,6 +14,8 @@ export interface ContextItem {
   reason: string;
   relationClass: string;
   confidence: string;
+  /** Source layer only: the requested excerpt, never persisted. */
+  excerpt?: string;
 }
 
 export interface TaskContextPacket {
@@ -34,6 +36,7 @@ export interface TaskContextPacket {
   budget: { layer: 'summary'; maxTokens: number | null; maxFiles: number | null };
   blindSpots: BlindSpot[];
   notes: string[];
+  degraded: string[];
 }
 
 export interface ContextInput {
@@ -66,6 +69,7 @@ export interface ContextInput {
   staleness: string;
   buildFingerprint: string | null;
   budget: { maxTokens: number | null; maxFiles: number | null };
+  degraded?: string[];
 }
 
 export function buildTaskContext(input: ContextInput): TaskContextPacket {
@@ -161,8 +165,9 @@ export function buildTaskContext(input: ContextInput): TaskContextPacket {
     },
     blindSpots: input.blindSpots,
     notes: [
-      'context source layer is disabled by default; preflight uses summary + relations',
-      'nex context / MCP exposure is Phase 07; this packet is the shared implementation',
+      'context source layer is disabled unless --context-lines is provided',
+      'preflight, nex context and MCP context share this packet implementation',
     ],
+    degraded: [...new Set(input.degraded ?? [])].sort(),
   };
 }

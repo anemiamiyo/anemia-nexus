@@ -297,12 +297,15 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
       ),
     );
 
-    // 12.4 state machine: only the documented transition set is legal.
+    // 12.4 state machine: only the documented transition set is legal. An
+    // unchanged state is not a transition at all (e.g. fresh -> fresh after a
+    // normal rebuild); only an actual change must appear in the table.
     const durableState =
       manifest.staleness === 'indexing' || manifest.staleness === 'dirty'
         ? 'stale'
         : manifest.staleness;
-    const legal = isTransitionAllowed(durableState, root.staleness);
+    const legal =
+      durableState === root.staleness || isTransitionAllowed(durableState, root.staleness);
     checks.push(
       legal
         ? check(

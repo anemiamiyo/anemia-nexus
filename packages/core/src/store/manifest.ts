@@ -122,6 +122,12 @@ export interface RootManifest {
     concurrency: number;
     peakRssMBGlobal: number;
     degradedStages: string[];
+    /** Phase 07: explainable dynamic budget (D3). Older manifests omit these. */
+    effectiveBudgetMB?: number;
+    availableMemMB?: number;
+    dynamicBudgetMB?: number;
+    configuredMaxMemoryMB?: number | null;
+    autoBudget?: boolean;
   };
   warnings: Array<{ code: string; message: string; severity: 'warning' | 'error' }>;
   configLoads: Array<{

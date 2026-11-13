@@ -66,10 +66,14 @@ function clearDeadLock(directory: string): boolean {
  * Per-root writer lock via proper-lockfile (docs/12-indexing.md 12.3.5).
  * Never a custom lock implementation. The lock directory itself must exist.
  */
-export async function withRootLock<T>(directory: string, action: () => Promise<T>): Promise<T> {
+export async function withRootLock<T>(
+  directory: string,
+  action: () => Promise<T>,
+  waitMs = LOCK_WAIT_MS,
+): Promise<T> {
   fs.mkdirSync(directory, { recursive: true });
   clearDeadLock(directory);
-  const retries = Math.max(1, Math.ceil(LOCK_WAIT_MS / 1000));
+  const retries = waitMs <= 0 ? 0 : Math.max(1, Math.ceil(waitMs / 1000));
   const release = await lockfile
     .lock(directory, {
       stale: STALE_MS,
@@ -121,4 +125,27 @@ export const ROOT_LOCK_STALE_MS = STALE_MS;
 /** Recovery helper: remove the lock only when its recorded owner is dead. */
 export function clearDeadRootLock(directory: string): boolean {
   return clearDeadLock(directory);
+}
+
+/**
+ * 14.1.1: refresh must report E08 instead of waiting when another live process
+ * holds a root lock. This is a read-only pre-check; the authoritative
+ * proper-lockfile acquisition still happens in withRootLock.
+ */
+export function findLiveRootLock(projectRoot: string): string | null {
+  const rootsDir = path.join(projectRoot, '.nexus', 'roots');
+  if (!fs.existsSync(rootsDir)) return null;
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(rootsDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.endsWith('.lock')) continue;
+    const rootId = entry.name.slice(0, -5);
+    const owner = readOwner(path.join(rootsDir, rootId));
+    if (owner !== null && processAlive(owner.pid)) return rootId;
+  }
+  return null;
 }

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "MCP server for Anemia Nexus (workspace skeleton)",
+  "description": "MCP server for Anemia Nexus (8 tools, stdio)",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=22.16.0"
@@ -20,8 +20,13 @@
     "dist"
   ],
   "sideEffects": false,
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
+    "anemia-core": "0.0.0",
+    "zod": "4.6.7"
+  },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --target node20 --dts --clean",
+    "build": "tsup",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   }
 }

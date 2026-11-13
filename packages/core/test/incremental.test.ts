@@ -224,6 +224,34 @@ describe('nex update (Phase 06)', () => {
   });
 });
 
+describe('refresh guard (14.1.1)', () => {
+  it('rejects more changed files than the limit before writing', async () => {
+    const fixture = await indexFixture('F07-api-surface', 'refresh-guard');
+    directories.push(fixture.directory);
+    const loaded = await loadConfig({ projectRoot: fixture.directory });
+    const before = readManifest(manifestPath(fixture.directory, fixture.rootId)).manifest?.buildId;
+    fs.appendFileSync(
+      path.join(fixture.directory, 'src', 'math.ts'),
+      '\nexport const refreshGuardA = 1;\n',
+    );
+    fs.appendFileSync(
+      path.join(fixture.directory, 'src', 'utils.ts'),
+      '\nexport const refreshGuardB = 2;\n',
+    );
+    await expect(
+      buildWorkspace({
+        projectRoot: fixture.directory,
+        loadedConfig: loaded,
+        mode: 'update',
+        refreshGuard: { maxChangedFiles: 1, rejectFullRebuild: true },
+        lockWaitMs: 0,
+      }),
+    ).rejects.toMatchObject({ code: 'E13' });
+    const after = readManifest(manifestPath(fixture.directory, fixture.rootId)).manifest?.buildId;
+    expect(after).toBe(before);
+  });
+});
+
 describe('root-set changes (17.2 #15)', () => {
   it('new root is the only one built', async () => {
     const directory = makeEmptyProject('root-set');

@@ -203,7 +203,7 @@ export function parseSignature(signature: string): SignatureParts {
   return { parameters, returnType, async: signature.includes('async ') };
 }
 
-function normalizeType(value: string): string {
+export function normalizeType(value: string): string {
   return value
     .replace(/\s+/g, ' ')
     .replace(/\s*([<>{}[\]|&:,])\s*/g, '$1')

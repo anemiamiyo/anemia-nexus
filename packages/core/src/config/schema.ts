@@ -28,11 +28,12 @@ export const budgetsSchema = z.strictObject({
 
 /**
  * Global Resource Coordinator limits (docs/05-data-model.md 5.10.3).
- * `maxMemoryMB` is the global build budget; `concurrency` is an upper bound,
- * further capped by memory, CPU and root count.
+ * `maxMemoryMB` is optional: when absent the budget is derived from currently
+ * available memory (Phase 07 decision D3). An explicit value still caps it.
+ * `concurrency` is an upper bound, further capped by memory, CPU and root count.
  */
 export const resourcesSchema = z.strictObject({
-  maxMemoryMB: z.number().int().positive().max(32768).default(900),
+  maxMemoryMB: z.number().int().positive().max(32768).optional(),
   concurrency: z.number().int().positive().max(32).default(1),
 });
 

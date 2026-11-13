@@ -35,7 +35,9 @@ export const CAPABILITIES = {
   crashRecovery: 'matrix-12.3.3',
   stateMachine: 'fresh|dirty|indexing|stale|failed',
   scheduler: 'cooperative',
-  mcpFormats: [] as string[],
+  mcpFormats: ['lines', 'json'] as string[],
+  mcpTools: 'status|search|symbol|references|deps|impact|context|refresh',
+  mcpReadOnly: 'seven-tools-no-refresh',
   dynamicUnresolved: 'marked',
 } as const;
 
@@ -93,6 +95,29 @@ export interface ConfigStatus {
   warning: string | null;
 }
 
+export interface OnboardingCandidate {
+  rootId: string;
+  rootPath: string;
+  indexable: boolean;
+}
+
+export interface OnboardingInfo {
+  state: 'uninitialized' | 'ready';
+  environment: {
+    nodeVersion: string;
+    nodeSatisfied: boolean;
+    configKind: ConfigStatus['sourceKind'];
+    needsTrust: boolean;
+    tsconfig: { found: boolean; path: string | null };
+    git: 'available' | 'missing-or-worktree';
+    typecheck: 'not-run';
+  };
+  candidates: OnboardingCandidate[];
+  nextCommands: string[];
+  estimateSeconds: { min: number; max: number; basis: string };
+  assets: string[];
+}
+
 export interface StatusReport {
   state: 'uninitialized' | 'ready';
   staleness: StalenessState | 'uninitialized';
@@ -104,6 +129,7 @@ export interface StatusReport {
   self: SelfInfo;
   config: ConfigStatus;
   guidance: string[];
+  onboarding: OnboardingInfo | null;
   warnings: WarningItem[];
   projectRoot: string;
 }
@@ -267,6 +293,70 @@ export function findActiveRoot(
   return best?.rootId ?? null;
 }
 
+function nodeVersionSatisfied(version: string): boolean {
+  const [majorRaw, minorRaw] = version.split('.');
+  const major = Number.parseInt(majorRaw ?? '0', 10);
+  const minor = Number.parseInt(minorRaw ?? '0', 10);
+  return major > 22 || (major === 22 && minor >= 16);
+}
+
+/**
+ * 22.2 onboarding block: environment checks, candidate roots, copy-paste
+ * commands, an honest time estimate and the integration-asset commands. The
+ * same object is rendered by pretty and lines so information parity holds.
+ */
+export function buildOnboarding(
+  projectRoot: string,
+  config: ConfigStatus,
+  state: 'uninitialized' | 'ready' = 'uninitialized',
+): OnboardingInfo {
+  const candidates: OnboardingCandidate[] = (() => {
+    try {
+      return discoverRoots({ projectRoot }).candidates.map((candidate) => ({
+        rootId: candidate.rootId,
+        rootPath: candidate.rootPath,
+        indexable: candidate.indexable,
+      }));
+    } catch {
+      return [];
+    }
+  })();
+  const rootTsconfig = path.join(projectRoot, 'tsconfig.json');
+  const tsconfigFound =
+    fs.existsSync(rootTsconfig) ||
+    candidates.some((candidate) =>
+      fs.existsSync(path.join(projectRoot, candidate.rootPath, 'tsconfig.json')),
+    );
+  const firstCandidate = candidates[0];
+  return {
+    state,
+    environment: {
+      nodeVersion: process.versions.node,
+      nodeSatisfied: nodeVersionSatisfied(process.versions.node),
+      configKind: config.sourceKind,
+      needsTrust: config.needsTrust,
+      tsconfig: {
+        found: tsconfigFound,
+        path: tsconfigFound
+          ? fs.existsSync(rootTsconfig)
+            ? 'tsconfig.json'
+            : `${firstCandidate?.rootPath ?? '.'}/tsconfig.json`
+          : null,
+      },
+      git: fs.existsSync(path.join(projectRoot, '.git')) ? 'available' : 'missing-or-worktree',
+      typecheck: 'not-run',
+    },
+    candidates,
+    nextCommands: ['nex init --roots all --write-config --yes', 'nex build', 'nex status'],
+    estimateSeconds: {
+      min: 5,
+      max: 120,
+      basis: 'unverified estimate; actual time depends on project size and machine',
+    },
+    assets: ['nex print mcp-config', 'nex print agents', 'nex print skill'],
+  };
+}
+
 function emptyStatus(
   projectRoot: string,
   self: SelfInfo,
@@ -284,6 +374,7 @@ function emptyStatus(
     self,
     config,
     guidance: ['nex init --yes', 'nex build', 'nex status'],
+    onboarding: buildOnboarding(projectRoot, config),
     warnings,
     projectRoot: relativeDisplay(projectRoot, projectRoot),
   };
@@ -538,6 +629,9 @@ export async function statusReport(options: StatusOptions): Promise<StatusReport
     self: options.self,
     config: configStatus,
     guidance,
+    // 22.2 only needs the onboarding block before the first usable index. A
+    // ready project must not pay for a root discovery scan on every query.
+    onboarding: null,
     warnings,
     projectRoot: relativeDisplay(projectRoot, projectRoot),
   };

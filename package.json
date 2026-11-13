@@ -12,7 +12,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w anemia-core && npm run build -w anemia-cli && npm run build -w anemia-mcp && npm run build -w anemia-adapter-vue",
+    "build": "npm run build -w anemia-core && npm run build -w anemia-mcp && npm run build -w anemia-cli && npm run build -w anemia-adapter-vue",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "test": "vitest run",
     "test:watch": "vitest",

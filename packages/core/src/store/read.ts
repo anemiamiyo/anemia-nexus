@@ -134,6 +134,27 @@ export function readSymbolsForPathPrefix(store: ReadStore, prefix: string): Symb
   return rows.map(rowToSymbol);
 }
 
+export function countSymbols(store: ReadStore): number {
+  const row = store.db
+    .prepare('select count(*) as count from symbols where build_id = ?')
+    .get(store.build.buildId) as { count?: unknown };
+  return typeof row.count === 'number' ? row.count : 0;
+}
+
+/**
+ * Deterministic full symbol listing for duplicate auditing. `limit` is a hard
+ * safety bound; callers compare `countSymbols` with the returned length and
+ * must report truncation instead of pretending the listing was complete.
+ */
+export function readAllSymbols(store: ReadStore, limit = 20000): SymbolRecord[] {
+  const rows = store.db
+    .prepare(`select ${SYMBOL_COLUMNS} from symbols where build_id = ? order by symbol_id limit ?`)
+    .all(store.build.buildId, Math.min(Math.max(limit, 1), 20000)) as Array<
+    Record<string, unknown>
+  >;
+  return rows.map(rowToSymbol);
+}
+
 export function findSymbolsByName(store: ReadStore, name: string, limit = 50): SymbolRecord[] {
   const rows = store.db
     .prepare(

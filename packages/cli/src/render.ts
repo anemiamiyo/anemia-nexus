@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { styleText } from 'node:util';
 
 import type { NexusError } from 'anemia-core';
@@ -154,6 +156,38 @@ function statusLines(data: Row): string[] {
       `capabilities styleDependency=${field(capabilities.styleDependency)} styleSelector=${field(capabilities.styleSelector)} htmlFileRef=${field(capabilities.htmlFileRef)} vue=${field(capabilities.vue)} templateReferences=${field(capabilities.templateReferences)} apiSurface=${field(capabilities.apiSurface)} dependencyGraph=${field(capabilities.dependencyGraph)} callGraph=${field(capabilities.callGraph)} architectureRules=${field(capabilities.architectureRules)} incremental=${field(capabilities.incremental)} mcpFormats=${field(capabilities.mcpFormats)}`,
     );
   }
+  const onboarding = asRecord(data.onboarding);
+  if (onboarding !== null) {
+    const environment = asRecord(onboarding.environment);
+    if (environment !== null) {
+      const tsconfig = asRecord(environment.tsconfig);
+      lines.push(
+        `onboarding node=${str(environment.nodeVersion)} satisfied=${field(environment.nodeSatisfied)} config=${str(environment.configKind)} needsTrust=${field(environment.needsTrust)} tsconfig=${tsconfig?.found === true ? str(tsconfig.path) : 'missing'} git=${str(environment.git)} typecheck=${str(environment.typecheck)}`,
+      );
+    }
+    for (const candidate of Array.isArray(onboarding.candidates) ? onboarding.candidates : []) {
+      const entry = asRecord(candidate);
+      if (entry === null) continue;
+      lines.push(
+        `onboarding candidate ${str(entry.rootId)}  ${str(entry.rootPath)}  indexable=${field(entry.indexable)}`,
+      );
+    }
+    const estimate = asRecord(onboarding.estimateSeconds);
+    if (estimate !== null) {
+      lines.push(
+        `onboarding estimate ${field(estimate.min)}-${field(estimate.max)}s basis=${str(estimate.basis)}`,
+      );
+    }
+    for (const command of Array.isArray(onboarding.nextCommands) ? onboarding.nextCommands : []) {
+      lines.push(`onboarding next ${String(command)}`);
+    }
+    for (const asset of Array.isArray(onboarding.assets) ? onboarding.assets : []) {
+      lines.push(`onboarding asset ${String(asset)}`);
+    }
+  }
+  for (const step of Array.isArray(data.guidance) ? data.guidance : []) {
+    lines.push(`next ${String(step)}`);
+  }
   validateLineLength(lines, 0);
   return lines;
 }
@@ -162,6 +196,20 @@ function doctorLines(data: Row): string[] {
   const lines = rowsOf(data, 'checks').map(
     (check) => `${str(check.status)}  ${str(check.id)}  ${str(check.detail)}`,
   );
+  const repair = asRecord(data.repair);
+  if (repair !== null) {
+    if (repair.skipped === true) {
+      lines.push('repair skipped (not confirmed)');
+    } else {
+      for (const actionEntry of Array.isArray(repair.actions) ? repair.actions : []) {
+        const action = asRecord(actionEntry);
+        if (action === null) continue;
+        lines.push(`repair ${str(action.status)}  ${str(action.id)}  ${str(action.detail)}`);
+      }
+      const removed = Array.isArray(repair.removedOrphans) ? repair.removedOrphans : [];
+      if (removed.length > 0) lines.push(`repair removedOrphans=${removed.join(',')}`);
+    }
+  }
   const summary = asRecord(data.summary);
   if (summary) {
     lines.push(
@@ -252,7 +300,7 @@ function updateLines(data: Row): string[] {
   const resources = asRecord(data.resources);
   if (resources !== null) {
     lines.push(
-      `resources budgetMB=${field(resources.budgetMB)} concurrency=${field(resources.concurrency)} peakRssMB=${field(resources.peakRssMBGlobal)} degraded=${Array.isArray(resources.degradedStages) ? (resources.degradedStages.length === 0 ? '[]' : resources.degradedStages.join(',')) : '[]'}`,
+      `resources budgetMB=${field(resources.budgetMB)} concurrency=${field(resources.concurrency)} peakRssMB=${field(resources.peakRssMBGlobal)} availableMemMB=${field(resources.availableMemMB)} dynamicBudgetMB=${field(resources.dynamicBudgetMB)} configuredMaxMemoryMB=${field(resources.configuredMaxMemoryMB ?? 'auto')} degraded=${Array.isArray(resources.degradedStages) ? (resources.degradedStages.length === 0 ? '[]' : resources.degradedStages.join(',')) : '[]'}`,
     );
   }
   const recovery = asRecord(data.recovery);
@@ -538,6 +586,119 @@ function verifyLines(data: Row): string[] {
   });
 }
 
+function similarLines(data: Row): string[] {
+  const lines: string[] = [];
+  const target = asRecord(data.target);
+  if (target === null) {
+    lines.push('target -');
+  } else {
+    lines.push(
+      `target ${str(target.path)}:${field(target.line)}:${field(target.col)}  ${str(target.kind)}  ${str(target.symbolId)}  ${str(target.nameChain)}  module=${str(target.module, '-')}`,
+    );
+  }
+  lines.push(
+    `rules ${str(data.rulesVersion)}  isHeuristic=${field(data.isHeuristic)}  noSimilarFound=${field(data.noSimilarFound)}  scope=${str(data.scope)}  roots=${Array.isArray(data.roots) ? data.roots.join(',') : ''}`,
+  );
+  const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+  for (const entry of candidates) {
+    const candidate = asRecord(entry);
+    if (candidate === null) continue;
+    const symbol = asRecord(candidate.candidate) ?? {};
+    const location = asRecord(candidate.location) ?? {};
+    const breakdown = asRecord(candidate.scoreBreakdown) ?? {};
+    lines.push(
+      `? ${str(location.path)}:${field(location.line)}:${field(location.col)}  ${str(symbol.kind)}  ${str(symbol.symbolId)}  ${str(symbol.name)}  score=${field(candidate.score)}  ${str(candidate.suggestion)}  basis=${Array.isArray(candidate.matchBasis) ? candidate.matchBasis.join(',') : ''}`,
+    );
+    lines.push(
+      `  breakdown name=${field(breakdown.nameScore)} paramCount=${field(breakdown.paramCountScore)} paramTypes=${field(breakdown.paramTypeScore)} return=${field(breakdown.returnTypeScore)} module=${field(breakdown.moduleScore)} surface=${field(breakdown.surfaceScore)} structure=${field(breakdown.structuralScore)}`,
+    );
+  }
+  if (data.noSimilarFound === true) {
+    lines.push(
+      `no-similar-found scope=${str(data.scope)} roots=${Array.isArray(data.roots) ? data.roots.join(',') : ''} rules=${str(data.rulesVersion)}`,
+    );
+  }
+  return lines;
+}
+
+function duplicatesLines(data: Row): string[] {
+  const lines: string[] = [];
+  lines.push(
+    `disclaimer ${str(data.disclaimer, 'similar is not equivalent; manual confirmation required')}`,
+  );
+  lines.push(
+    `rules ${str(data.rulesVersion)}  threshold=${field(data.threshold)}  scope=${str(data.scope)}  relationClass=${str(data.relationClass, 'heuristic')}  groups=${field(asRecord(data.counts)?.groups ?? 0)}`,
+  );
+  const groups = Array.isArray(data.groups) ? data.groups : [];
+  for (const entry of groups) {
+    const group = asRecord(entry);
+    if (group === null) continue;
+    lines.push(
+      `group ${str(group.id)}  maxScore=${field(group.maxScore)}  members=${field(group.memberCount)}  relationClass=${str(group.relationClass, 'heuristic')}`,
+    );
+    for (const memberEntry of Array.isArray(group.members) ? group.members : []) {
+      const member = asRecord(memberEntry);
+      if (member === null) continue;
+      lines.push(
+        `  member ${str(member.path)}:${field(member.line)}:${field(member.col)}  ${str(member.kind)}  ${str(member.symbolId)}  ${str(member.nameChain)}  lines=${field(member.implementationLines)}  module=${str(member.module, '-')}`,
+      );
+    }
+    for (const diffEntry of Array.isArray(group.differences) ? group.differences : []) {
+      const diff = asRecord(diffEntry);
+      if (diff === null) continue;
+      lines.push(
+        `  diff ${str(diff.symbolId)}  paramCountDelta=${field(diff.paramCountDelta)}  paramTypes=${field(diff.paramTypeMatches)}/${field(diff.paramTypeCompared)}  returnTypeMatch=${field(diff.returnTypeMatch)}  lines=${field(diff.implementationLines)}  lineDelta=${field(diff.implementationLineDelta)}`,
+      );
+    }
+  }
+  if (data.truncated === true) {
+    lines.push(
+      `truncated ${Array.isArray(data.truncationReasons) ? data.truncationReasons.join('; ') : ''}`,
+    );
+  }
+  return lines;
+}
+
+function contextLines(data: Row): string[] {
+  const lines: string[] = [];
+  const target = asRecord(data.target);
+  lines.push(
+    `context task=${str(data.task, '-')}  target=${target === null ? '-' : `${str(target.filePath, str(target.name, '-'))}:${field(target.line)}`}  staleness=${str(data.staleness, '-')}`,
+  );
+  const layers = asRecord(data.layers);
+  if (layers !== null) {
+    for (const layer of ['summary', 'relations', 'source'] as const) {
+      const items = Array.isArray(layers[layer]) ? (layers[layer] as unknown[]) : [];
+      if (items.length === 0) continue;
+      lines.push(`layer ${layer} items=${items.length}`);
+      for (const entry of items) {
+        const item = asRecord(entry);
+        if (item === null) continue;
+        lines.push(
+          `  ${str(item.kind)} ${str(item.path)}:${field(item.line)}  ${str(item.symbolId, '-')}  ${str(item.name, '-')}  ${str(item.reason)}  ${str(item.relationClass)}  ${str(item.confidence)}`,
+        );
+        if (typeof item.excerpt === 'string') {
+          for (const excerptLine of item.excerpt.split('\n')) {
+            lines.push(`    | ${excerptLine}`);
+          }
+        }
+      }
+    }
+  }
+  const blindSpots = Array.isArray(data.blindSpots) ? data.blindSpots : [];
+  for (const spotEntry of blindSpots) {
+    const spot = asRecord(spotEntry);
+    if (spot === null) continue;
+    lines.push(
+      `blindSpot ${str(spot.category)}/${str(spot.missReason)} files=${field(spot.affectedFiles)} hint=${str(spot.manualCheckHint)}`,
+    );
+  }
+  if (data.nextCursor !== null && data.nextCursor !== undefined) {
+    lines.push(`nextCursor ${String(data.nextCursor)}`);
+  }
+  return lines;
+}
+
 function entriesFor(command: string, data: Row): string[] {
   switch (command) {
     case 'references':
@@ -552,6 +713,12 @@ function entriesFor(command: string, data: Row): string[] {
       return postflightLines(data);
     case 'verify':
       return verifyLines(data);
+    case 'similar':
+      return similarLines(data);
+    case 'audit-duplicates':
+      return duplicatesLines(data);
+    case 'context':
+      return contextLines(data);
     case 'symbol':
     case 'search':
       return symbolLines(data);
@@ -804,6 +971,71 @@ export function renderMarkdown(input: RenderInput): string {
       markdownTable(['Root', 'OK', 'Mode', 'Symbols', 'References', 'ms', 'Build/Error'], rows),
       '',
     );
+  } else if (command === 'similar') {
+    const rows = (Array.isArray(data.candidates) ? data.candidates : []).map((entry) => {
+      const candidate = asRecord(entry) ?? {};
+      const symbol = asRecord(candidate.candidate) ?? {};
+      const location = asRecord(candidate.location) ?? {};
+      return [
+        `${str(location.path)}:${field(location.line)}:${field(location.col)}`,
+        str(symbol.kind),
+        str(symbol.symbolId),
+        str(symbol.name),
+        field(candidate.score),
+        str(candidate.suggestion),
+        Array.isArray(candidate.matchBasis) ? candidate.matchBasis.join(',') : '',
+      ];
+    });
+    lines.push(
+      '> Similarity is heuristic; it is not equivalence and never a deletion signal.',
+      '',
+      '## Candidates',
+      '',
+      markdownTable(['Location', 'Kind', 'SymbolId', 'Name', 'Score', 'Suggestion', 'Basis'], rows),
+      '',
+    );
+  } else if (command === 'audit-duplicates') {
+    const rows = (Array.isArray(data.groups) ? data.groups : []).map((entry) => {
+      const group = asRecord(entry) ?? {};
+      const members = Array.isArray(group.members) ? group.members : [];
+      return [
+        str(group.id),
+        field(group.maxScore),
+        field(group.memberCount),
+        members.length > 0 ? str(asRecord(members[0])?.path) : '-',
+        str(group.relationClass),
+      ];
+    });
+    lines.push(
+      `> ${str(data.disclaimer, 'Similarity is not equivalence; manual confirmation is required.')}`,
+      '',
+      '## Groups',
+      '',
+      markdownTable(['Group', 'Score', 'Members', 'Representative', 'Relation'], rows),
+      '',
+    );
+  } else if (command === 'context') {
+    const layers = asRecord(data.layers) ?? {};
+    const rows: string[][] = [];
+    for (const layer of ['summary', 'relations', 'source'] as const) {
+      for (const entry of Array.isArray(layers[layer]) ? (layers[layer] as unknown[]) : []) {
+        const item = asRecord(entry) ?? {};
+        rows.push([
+          layer,
+          `${str(item.path)}:${field(item.line)}`,
+          str(item.kind),
+          str(item.name, '-'),
+          str(item.reason),
+          str(item.relationClass),
+        ]);
+      }
+    }
+    lines.push(
+      '## Context layers',
+      '',
+      markdownTable(['Layer', 'Location', 'Kind', 'Name', 'Reason', 'Relation'], rows),
+      '',
+    );
   } else if (['impact', 'preflight', 'postflight', 'verify'].includes(command)) {
     const details = entriesFor(command, data);
     if (details.length > 0) {
@@ -845,6 +1077,12 @@ function conclusion(command: string, data: Row): string {
       return `Postflight: ${field(asRecord(data.counts)?.total ?? 0)} changed symbol(s), confidence ${str(data.confidence)}, exit ${field(asRecord(data.exit)?.code ?? 0)}`;
     case 'verify':
       return `Verify: ${field(asRecord(data.counts)?.total ?? 0)} command(s), ${field(data.failed ?? 0)} failed`;
+    case 'similar':
+      return `Similar: ${field(asRecord(data.counts)?.returned ?? 0)} candidate(s), rules ${str(data.rulesVersion)}, heuristic only`;
+    case 'audit-duplicates':
+      return `Duplicate audit: ${field(asRecord(data.counts)?.groups ?? 0)} group(s) at threshold ${field(data.threshold)}, heuristic only`;
+    case 'context':
+      return `Context: ${field(Array.isArray(asRecord(data.layers)?.summary) ? (asRecord(data.layers)?.summary as unknown[]).length : 0)} summary item(s), staleness ${str(data.staleness, 'fresh')}`;
     case 'init':
       return `Init: ${field(data.written) === 'true' ? 'configuration written' : 'dry run'}`;
     default:
@@ -940,26 +1178,41 @@ function relativeProjectHint(): string {
   return 'Run `nex status` to inspect Node, configuration and index state.';
 }
 
+function errorFile(error: NexusError): string | null {
+  if (error.file === null || error.file === '') return null;
+  if (!path.isAbsolute(error.file)) return error.file.replaceAll('\\', '/');
+  const relative = path.relative(process.cwd(), error.file);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) return path.basename(error.file);
+  return relative.replaceAll('\\', '/');
+}
+
 export function renderError(error: NexusError, format: OutputFormat, exitCode: number): string {
-  const payload = {
-    error: {
-      code: error.code,
-      category: error.category,
-      severity: error.severity,
-      message: error.message,
-      reason: error.reason,
-      file: error.file,
-      suggestion: error.suggestion,
-      evidence: error.evidence,
-    },
-    exitCode,
-  };
-  if (format === 'json') return JSON.stringify(payload, null, 2);
+  if (format === 'json') {
+    return JSON.stringify(
+      {
+        code: error.code,
+        category: error.category,
+        severity: error.severity,
+        message: error.message,
+        reason: error.reason,
+        file: errorFile(error),
+        suggestion: error.suggestion,
+        evidence: error.evidence,
+        coverage: null,
+        exitCode,
+      },
+      null,
+      2,
+    );
+  }
+  const hasTsconfig = fs.existsSync(path.join(process.cwd(), 'tsconfig.json'));
+  const hasConfig = fs.existsSync(path.join(process.cwd(), '.nexus', 'nexus.config.json'));
+  const hasGit = fs.existsSync(path.join(process.cwd(), '.git'));
   const lines = [
-    error.message,
+    `${error.message} — ${error.reason} (${error.code})`,
     error.suggestion === '' ? relativeProjectHint() : `Run: ${error.suggestion}`,
-    `Check: node ${process.versions.node}; code ${error.code}; category ${error.category}${error.file === null ? '' : `; file ${error.file}`}`,
-    'If the command is not this tool, use the backup command: anex.',
+    `Check: node ${process.versions.node} (requires >=22.16.0); tsconfig ${hasTsconfig ? 'present' : 'missing'}; configuration ${hasConfig ? 'present' : 'missing'}; git ${hasGit ? 'present' : 'missing-or-worktree'}.`,
+    'If the command name collides with another package, use the backup command: anex. An unapproved TypeScript config is never executed.',
   ];
   return lines.join('\n');
 }

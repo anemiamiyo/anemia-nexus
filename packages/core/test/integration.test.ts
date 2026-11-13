@@ -60,7 +60,7 @@ describe('F01 build and queries', () => {
       expect(status.capabilities.dependencyGraph).toBe('file-level');
       expect(status.capabilities.callGraph).toBe('static-ts');
       expect(status.capabilities.architectureRules).toBe('allow-list');
-      expect(status.capabilities.mcpFormats).toEqual([]);
+      expect(status.capabilities.mcpFormats).toEqual(['lines', 'json']);
       expect(status.roots).toHaveLength(1);
 
       const references = await queryReferences(

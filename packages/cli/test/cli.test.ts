@@ -158,6 +158,10 @@ describe('lifecycle commands', () => {
       const initPayload = JSON.parse(init.stdout) as { written: boolean; selected: string[] };
       expect(initPayload.written).toBe(true);
       expect(initPayload.selected).toEqual(['f01-reexport-chain']);
+      const writtenConfig = JSON.parse(
+        fs.readFileSync(path.join(directory, '.nexus', 'nexus.config.json'), 'utf8'),
+      ) as { defaults: { resources: Record<string, unknown> } };
+      expect(writtenConfig.defaults.resources.maxMemoryMB).toBeUndefined();
 
       const build = await runCli(['build', '--format', 'json'], directory);
       expect(build.code).toBe(0);
@@ -295,12 +299,10 @@ describe('lifecycle commands', () => {
   it('never returns fake success for unimplemented commands', async () => {
     const directory = makeEmptyProject('cli-stub');
     try {
-      for (const command of ['mcp', 'print', 'test']) {
-        const result = await runCli([command, '--format', 'json'], directory);
-        expect(result.code).toBe(1);
-        expect(result.stdout).toContain('E24');
-        expect(result.stdout).toContain('not provided');
-      }
+      const result = await runCli(['test', '--format', 'json'], directory);
+      expect(result.code).toBe(1);
+      expect(result.stdout).toContain('E24');
+      expect(result.stdout).toContain('not provided');
     } finally {
       cleanup(directory);
     }

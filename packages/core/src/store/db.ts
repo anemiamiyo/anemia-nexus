@@ -47,12 +47,23 @@ export function openDatabase(filePath: string, options: OpenDatabaseOptions = {}
     timeout: options.timeoutMs ?? 5000,
     enableForeignKeyConstraints: true,
   });
-  if (!options.readOnly) {
-    db.exec('PRAGMA journal_mode = WAL');
-    db.exec('PRAGMA synchronous = NORMAL');
-    db.exec('PRAGMA foreign_keys = ON');
+  try {
+    if (!options.readOnly) {
+      db.exec('PRAGMA journal_mode = WAL');
+      db.exec('PRAGMA synchronous = NORMAL');
+      db.exec('PRAGMA foreign_keys = ON');
+    }
+    return db;
+  } catch (error) {
+    // A corrupt/non-SQLite file can fail during PRAGMA setup; close the handle
+    // so recovery and `doctor --repair` can delete or inspect the file.
+    try {
+      db.close();
+    } catch {
+      // best effort
+    }
+    throw error;
   }
-  return db;
 }
 
 export function sqliteVersionOf(db: DatabaseSync): string {
