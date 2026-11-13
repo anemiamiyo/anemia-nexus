@@ -1,6 +1,11 @@
 # Normalize line endings for reproducible source hashing (docs/05-data-model.md 5.4).
 * text=auto eol=lf
 
+# Windows CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
 *.png binary
 *.jpg binary
 *.jpeg binary
@@ -8,3 +13,20 @@
 *.ico binary
 *.woff binary
 *.woff2 binary
+*.db      binary
+*.sqlite  binary
+*.sqlite3 binary
+*.scip    binary
+*.ttf   binary
+*.otf   binary
+*.eot   binary
+*.webp  binary
+*.avif  binary
+*.mp4   binary
+*.webm  binary
+*.zip   binary
+*.gz    binary
+*.tar   binary
+*.pdf   binary
+*.wasm  binary
+*.node  binary

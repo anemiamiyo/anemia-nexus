@@ -9,3 +9,4 @@ phase00/tmp
 phase00/results
 package-lock.json
 CHANGELOG.md
+*.md
