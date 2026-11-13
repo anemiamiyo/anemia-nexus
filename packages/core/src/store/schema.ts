@@ -4,10 +4,12 @@
  * docs/04-architecture.md 4.1.1 and the Component entity of
  * docs/05-data-model.md 5.1; Phase 04 adds the relation-graph and architecture
  * tables of docs/05-data-model.md 5.1/5.6 (Dependency, CallRelation,
- * ArchitectureModule). Incompatible changes require a new version and a
- * rebuild; no migration is provided.
+ * ArchitectureModule). Phase 05 adds the Test relation table of
+ * docs/05-data-model.md 5.1/5.6 (8th relation class, docs/08-relations.md).
+ * Incompatible changes require a new version and a rebuild; no migration is
+ * provided.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const DDL_CURRENT = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -243,6 +245,24 @@ CREATE TABLE IF NOT EXISTS architecture_violations (
 
 CREATE INDEX IF NOT EXISTS architecture_violations_from_idx ON architecture_violations (build_id, from_module);
 CREATE INDEX IF NOT EXISTS architecture_violations_to_idx ON architecture_violations (build_id, to_module);
+
+CREATE TABLE IF NOT EXISTS tests (
+  test_id TEXT PRIMARY KEY,
+  build_id TEXT NOT NULL,
+  test_file TEXT NOT NULL,
+  target_symbol_id TEXT,
+  target_file TEXT,
+  test_type TEXT NOT NULL CHECK (test_type IN ('unit', 'integration', 'e2e', 'unknown')),
+  relation_class TEXT NOT NULL,
+  confidence TEXT NOT NULL,
+  analysis_engine TEXT NOT NULL,
+  line INTEGER NOT NULL,
+  evidence_json TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS tests_target_idx ON tests (build_id, target_symbol_id);
+CREATE INDEX IF NOT EXISTS tests_file_idx ON tests (build_id, test_file);
+CREATE INDEX IF NOT EXISTS tests_target_file_idx ON tests (build_id, target_file);
 `;
 
 export interface RequiredIndex {
@@ -264,4 +284,7 @@ export const REQUIRED_INDEXES: readonly RequiredIndex[] = [
   { table: 'dependencies', columns: ['target_file'] },
   { table: 'calls', columns: ['caller_symbol_id'] },
   { table: 'calls', columns: ['callee_symbol_id'] },
+  { table: 'tests', columns: ['build_id', 'target_symbol_id'] },
+  { table: 'tests', columns: ['build_id', 'test_file'] },
+  { table: 'tests', columns: ['build_id', 'target_file'] },
 ];

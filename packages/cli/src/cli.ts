@@ -16,9 +16,14 @@ import {
   querySymbol,
   queryDependencies,
   statusReport,
+  analyzeImpact,
+  impactData,
+  runPreflight,
+  runPostflight,
+  runVerify,
+  type BuildProgressEvent,
   writeBaselineSnapshot,
   diffCurrentSurface,
-  type BuildProgressEvent,
   type Coverage,
   type DependencyQueryType,
   type QueryEnvelope,
@@ -34,6 +39,7 @@ interface ActionOutcome {
   data: Record<string, unknown>;
   exitCode: number;
   skipRender?: boolean;
+  format?: OutputFormat;
 }
 
 type ActionHandler = (context: CliContext, command: Command) => Promise<ActionOutcome>;
@@ -102,11 +108,15 @@ async function execute(command: Command, handler: ActionHandler): Promise<void> 
     }
     const renderCommand =
       typeof outcome.data.command === 'string' ? outcome.data.command : command.name();
-    const text = renderOutput({ command: renderCommand, data: outcome.data }, context.format, {
-      color: context.color,
-      width: context.width,
-      explain: context.explain,
-    });
+    const text = renderOutput(
+      { command: renderCommand, data: outcome.data },
+      outcome.format ?? context.format,
+      {
+        color: context.color,
+        width: context.width,
+        explain: context.explain,
+      },
+    );
     if (context.outputFile !== null) {
       const target = path.resolve(context.cwd, context.outputFile);
       fs.writeFileSync(target, `${text}\n`, 'utf8');
@@ -155,6 +165,12 @@ function envelopeFields(envelope: QueryEnvelope<unknown>): Record<string, unknow
     buildFingerprint: envelope.buildFingerprint,
     identityAmbiguous: envelope.identityAmbiguous,
     degraded: envelope.degraded,
+    scope: envelope.scope,
+    byRoot: envelope.byRoot,
+    globalAmbiguous: envelope.globalAmbiguous,
+    staleRoots: envelope.staleRoots,
+    failedRoots: envelope.failedRoots,
+    completeness: envelope.completeness,
     items: envelope.items,
     warnings: envelope.warnings,
     budget: envelope.budget,
@@ -214,7 +230,7 @@ export function buildProgram(): Command {
   program
     .name('nex')
     .description(
-      'Anemia Nexus — deterministic index for change audit and API governance (Phase 01)',
+      'Anemia Nexus — deterministic index for change audit and API governance (Phase 05)',
     )
     .version(
       versionString({ projectRoot: process.cwd() }),
@@ -527,7 +543,10 @@ export function buildProgram(): Command {
       const data = {
         command: 'symbol',
         ...envelopeFields(result.envelope),
-        counts: { ...result.envelope.counts, total: 1, returned: 1, certain: 1 },
+        counts:
+          result.envelope.counts.total <= 1
+            ? { ...result.envelope.counts, total: 1, returned: 1, certain: 1 }
+            : result.envelope.counts,
         symbol: result.envelope.items[0] ?? null,
         source,
       };
@@ -796,15 +815,223 @@ export function buildProgram(): Command {
     });
   });
 
+  const impact = addExamples(
+    program
+      .command('impact [target]')
+      .description('change impact, risk and affected surface for a file or symbol')
+      .helpGroup('Query')
+      .option('--symbol <name>', 'analyze a symbol instead of a file path')
+      .option('--depth <n>', 'indirect expansion depth (default 3, max 10)')
+      .option('--no-template', 'exclude Vue template edges from consumers'),
+    [
+      'nex impact src/core/useOverlay.ts',
+      'nex impact --symbol useOverlay --depth 2 --explain',
+      'nex impact src/styles/theme.scss --format json',
+    ],
+  );
+  impact.action(async (target: string | undefined, _options, command: Command) => {
+    await execute(command, async (context) => {
+      const opts = command.optsWithGlobals() as Record<string, unknown>;
+      const result = await analyzeImpact({
+        projectRoot: context.projectRoot,
+        cwd: context.cwd,
+        rootId: context.root,
+        roots: context.roots,
+        trustConfig: context.trustConfig,
+        target: target ?? '',
+        symbol: typeof opts.symbol === 'string' ? opts.symbol : null,
+        depth: typeof opts.depth === 'string' ? Number.parseInt(opts.depth, 10) : undefined,
+        includeTemplate: opts.template !== false,
+      });
+      const data = impactData(result);
+      const counts = data.counts as { heuristic: number; dynamicUnresolved: number };
+      const exitCode =
+        counts.heuristic > 0 ||
+        counts.dynamicUnresolved > 0 ||
+        data.completeness !== 'complete' ||
+        data.staleness !== 'fresh'
+          ? 2
+          : 0;
+      return { data, exitCode };
+    });
+  });
+
+  const reportFormatOf = (opts: Record<string, unknown>): OutputFormat | undefined => {
+    const value = opts.report;
+    if (value === undefined) return undefined;
+    if (value === 'json') return 'json';
+    if (value === 'md' || value === 'markdown') return 'markdown';
+    throw nexusError('E00', 'invalid --report value', {
+      reason: `expected md or json, received ${JSON.stringify(value)}`,
+      suggestion: 'Use --report md|json.',
+    });
+  };
+
+  const preflight = addExamples(
+    program
+      .command('preflight [target]')
+      .description('pre-change audit: existing APIs, similar code, dependencies, impact, tests')
+      .helpGroup('Audit')
+      .option('--task <text>', 'task description used for API and similarity search')
+      .option('--symbol <name>', 'analyze a symbol instead of a file path')
+      .option('--base <ref>', 'baseline ref for the Surface diff')
+      .option('--fail-on <level>', 'accepted for symmetry; preflight is read-only')
+      .option('--report <fmt>', 'md|json report format')
+      .option('--depth <n>', 'impact depth (default 3)'),
+    [
+      'nex preflight src/core/useOverlay.ts',
+      'nex preflight --task "add a close button to the overlay"',
+      'nex preflight --symbol useOverlay --report md',
+    ],
+  );
+  preflight.action(async (target: string | undefined, _options, command: Command) => {
+    await execute(command, async (context) => {
+      const opts = command.optsWithGlobals() as Record<string, unknown>;
+      const result = await runPreflight({
+        projectRoot: context.projectRoot,
+        cwd: context.cwd,
+        rootId: context.root,
+        roots: context.roots,
+        trustConfig: context.trustConfig,
+        target: target ?? null,
+        symbol: typeof opts.symbol === 'string' ? opts.symbol : null,
+        task: typeof opts.task === 'string' ? opts.task : null,
+        base: typeof opts.base === 'string' ? opts.base : null,
+        depth: typeof opts.depth === 'string' ? Number.parseInt(opts.depth, 10) : undefined,
+      });
+      const { exitCode, ...data } = result;
+      return {
+        data: { ...data, command: 'preflight' },
+        exitCode,
+        format: reportFormatOf(opts),
+      };
+    });
+  });
+
+  const postflight = addExamples(
+    program
+      .command('postflight')
+      .description('post-change audit: Git diff, changed symbols, Surface/deps/architecture/tests')
+      .helpGroup('Audit')
+      .option('--base <ref>', 'Git base ref (default HEAD)')
+      .option('--fail-on <level>', 'breaking|additive|ambiguous|warning|none', 'breaking')
+      .option('--report <fmt>', 'md|json report format')
+      .option('--only <ids>', 'verify command ids (comma-separated)'),
+    [
+      'nex postflight',
+      'nex postflight --base origin/main --fail-on breaking --format json',
+      'nex postflight --base HEAD~1 --report markdown',
+    ],
+  );
+  postflight.action(async (_options, command: Command) => {
+    await execute(command, async (context) => {
+      const opts = command.optsWithGlobals() as Record<string, unknown>;
+      const failOn = typeof opts.failOn === 'string' ? opts.failOn : 'breaking';
+      if (!['breaking', 'additive', 'ambiguous', 'warning', 'none'].includes(failOn)) {
+        throw nexusError('E00', 'invalid --fail-on value', {
+          reason: `expected breaking|additive|ambiguous|warning|none, received ${JSON.stringify(failOn)}`,
+          suggestion: 'Use --fail-on breaking|additive|ambiguous|warning|none.',
+        });
+      }
+      const result = await runPostflight({
+        projectRoot: context.projectRoot,
+        cwd: context.cwd,
+        rootId: context.root,
+        roots: context.roots,
+        trustConfig: context.trustConfig,
+        base: typeof opts.base === 'string' ? opts.base : null,
+        failOn: failOn as 'breaking' | 'additive' | 'ambiguous' | 'warning' | 'none',
+        yes: opts.yes === true,
+        only:
+          typeof opts.only === 'string'
+            ? opts.only
+                .split(',')
+                .map((entry) => entry.trim())
+                .filter((entry) => entry !== '')
+            : null,
+      });
+      return {
+        data: { ...result, command: 'postflight' },
+        exitCode: result.exit.code,
+        format: reportFormatOf(opts),
+      };
+    });
+  });
+
+  const verify = addExamples(
+    program
+      .command('verify')
+      .description('run commands from the authorized commands.allow whitelist')
+      .helpGroup('Audit')
+      .option('--only <ids>', 'run only these command ids (comma-separated)')
+      .option('--dry-run', 'list authorization state without executing')
+      .option('--purpose <text>', 'purpose echoed with every command'),
+    ['nex verify --dry-run', 'nex verify --yes', 'nex verify --only typecheck --yes'],
+  );
+  verify.action(async (_options, command: Command) => {
+    await execute(command, async (context) => {
+      const opts = command.optsWithGlobals() as Record<string, unknown>;
+      const loaded = await loadConfig({
+        projectRoot: context.projectRoot,
+        trustConfig: context.trustConfig,
+      });
+      if (loaded.config === null) {
+        throw nexusError('E17', 'configuration is not available', {
+          reason: 'no valid .nexus/nexus.config.json',
+          suggestion: 'Run `nex init --write-config --yes` first.',
+        });
+      }
+      const result = await runVerify({
+        projectRoot: context.projectRoot,
+        config: loaded.config,
+        only:
+          typeof opts.only === 'string'
+            ? opts.only
+                .split(',')
+                .map((entry) => entry.trim())
+                .filter((entry) => entry !== '')
+            : null,
+        dryRun: opts.dryRun === true,
+        yes: opts.yes === true,
+        explicit: true,
+        purpose: typeof opts.purpose === 'string' ? opts.purpose : 'verify',
+        onEcho: (line) => {
+          if (!context.quiet) writeStderr(line);
+        },
+      });
+      const failed = result.commands.filter(
+        (entry) => entry.status === 'failed' || entry.status === 'timedOut',
+      ).length;
+      const counts = {
+        total: result.commands.length,
+        returned: result.commands.length,
+        certain: result.commands.filter((entry) => entry.status === 'passed').length,
+        heuristic: 0,
+        dynamicUnresolved: 0,
+        partial: 0,
+      };
+      return {
+        data: {
+          command: 'verify',
+          commands: result.commands,
+          skipped: result.skipped,
+          counts,
+          failed,
+          notes: [
+            'commands are complete cmd+args entries from commands.allow; no shell is used',
+            '.nexus/trust.json records authorization by command signature',
+          ],
+        },
+        exitCode: failed > 0 ? 1 : 0,
+      };
+    });
+  });
+
   const stubs: Array<[string, string, string]> = [
     ['update', 'incremental update (not provided)', 'Lifecycle'],
-    ['impact', 'change impact analysis (not provided)', 'Query'],
     ['context', 'layered context packets (not provided)', 'Query'],
     ['similar', 'similar API search (not provided)', 'Governance'],
     ['audit-duplicates', 'duplicate implementation audit (not provided)', 'Governance'],
-    ['preflight', 'pre-change audit (not provided)', 'Audit'],
-    ['postflight', 'post-change audit (not provided)', 'Audit'],
-    ['verify', 'authorized command orchestration (not provided)', 'Audit'],
     ['print', 'print integration assets (not provided)', 'Access'],
     ['mcp', 'MCP server (not provided)', 'Access'],
     ['test', 'fixture and consistency tests (not provided)', 'Test'],
@@ -818,10 +1045,10 @@ export function buildProgram(): Command {
       .allowExcessArguments(true);
     stub.action(async (_options, command: Command) => {
       await execute(command, async () => {
-        throw nexusError('E24', `${name} is not provided in Phase 01`, {
+        throw nexusError('E24', `${name} is not provided`, {
           reason: 'this capability belongs to a later phase',
           suggestion:
-            'Phase 01 implements init, build, status, doctor, symbol, references and search.',
+            'Phase 05 implements init, build, status, doctor, symbol, references, search, deps, api-*, impact, preflight, postflight and verify.',
         });
       });
     });

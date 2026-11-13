@@ -22,9 +22,10 @@
 | `node:module` `registerHooks()` | TS 配置加载子进程的同步模块钩子，阻断网络/子进程模块 | **22.15.0** | **已验证：Phase 01（22.16.0 / 24.22.2）** | 18.3.2 |
 | Node Permission Model：`--permission`、`--allow-fs-read` | TS 配置子进程的文件系统与子进程边界 | **22.16.0** | **已验证：Phase 01 F17 用例** | 18.3.2；非 OS 级网络沙箱，残余风险见 Phase 01 报告 |
 | `--experimental-strip-types` | 在独立子进程中加载 `nexus.config.ts` | **22.16.0** | **已验证：Phase 01（22.16.0 / 24.22.2）** | 18.3.2 |
-| `node:readline` `createInterface()` | TTY 下的 init 交互提示（稳定 API，无实验标记） | 随 Node 提供 | **已验证：Phase 01 构建与 typecheck** | 11.6 |
+| `node:readline` `createInterface()` | TTY 下的 init / verify 交互确认（稳定 API，无实验标记） | 随 Node 提供 | **已验证：Phase 01 init；Phase 05 verify** | 11.6、18.4 |
 | `node:fs` `cpSync` | **仅测试夹具**复制；不进入产品运行路径 | 16.7.0（测试环境） | 已验证：Phase 01 测试 | 17.1 |
-| `node:child_process` `execFileSync` | 读取 git ref 形式的 API 基线（`git show <ref>:<path>`） | 随 Node 提供 | **已验证：Phase 03 单测与 act** | 6.3、11.3 |
+| `node:child_process` `execFile`（`shell: false`） | `verify` 白名单命令执行；超时与 1 MB 输出上限 | 随 Node 提供 | **已验证：Phase 05 单测与 CLI** | 18.4 |
+| `node:child_process` `execFileSync` | 读取 git ref 形式的 API 基线（`git show <ref>:<path>`）与 Phase 05 postflight Git 读取 | 随 Node 提供 | **已验证：Phase 03/05 单测与 act** | 6.3、11.3、13.2 |
 
 ## 3. 维护规则
 

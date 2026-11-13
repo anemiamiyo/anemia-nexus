@@ -97,6 +97,7 @@ export interface RootBuildResult {
   references: number;
   dependencies?: number;
   calls?: number;
+  tests?: number;
   durationMs: number;
   errorCode: string | null;
   errorMessage: string | null;
@@ -853,6 +854,7 @@ interface BuildRootOutcome {
   references: number;
   dependencies: number;
   calls: number;
+  tests: number;
   coverage: RootManifest['coverage'];
   vue: VueAnalysisSummary;
   degraded: string[];
@@ -1011,11 +1013,13 @@ async function buildRoot(input: {
         unresolvedReferences: coverage.unresolved,
         dependencies: committed.counts.dependencies,
         calls: committed.counts.calls,
+        tests: committed.counts.tests,
       },
       coverage,
       graph: {
         dependencies: analysis.graph.dependencies.length,
         calls: analysis.graph.calls.length,
+        tests: committed.counts.tests,
         styleEdges: analysis.graph.stats.style.edges,
         crossRootEdges: analysis.graph.stats.crossRootEdges,
         architectureViolations: analysis.graph.architectureViolations.length,
@@ -1086,6 +1090,7 @@ async function buildRoot(input: {
       references: committed.counts.references,
       dependencies: committed.counts.dependencies,
       calls: committed.counts.calls,
+      tests: committed.counts.tests,
       coverage,
       vue: analysis.vue,
       degraded,
@@ -1142,7 +1147,7 @@ function recordFailure(
     platform: platformId(),
     state: 'failed',
     staleness: 'failed',
-    counts: { files: 0, symbols: 0, references: 0, unresolvedReferences: 0 },
+    counts: { files: 0, symbols: 0, references: 0, unresolvedReferences: 0, tests: 0 },
     coverage: zerosCoverage(),
     vue: zeroVueSummary(0),
     stats: {

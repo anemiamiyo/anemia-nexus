@@ -136,7 +136,7 @@ function statusLines(data: Row): string[] {
   lines.push(`activeRoot ${str(data.activeRoot, '-')}`);
   for (const root of rowsOf(data, 'roots')) {
     lines.push(
-      `root ${str(root.rootId)}  ${str(root.rootPath)}  ${str(root.state)}/${str(root.staleness)}  files=${field(root.files)} symbols=${field(root.symbols)} refs=${field(root.references)} deps=${field(root.dependencies)} calls=${field(root.calls)}  build=${str(root.buildFingerprintPrefix, '-')}  surface=${field(root.surfaceEntries)}`,
+      `root ${str(root.rootId)}  ${str(root.rootPath)}  ${str(root.state)}/${str(root.staleness)}  files=${field(root.files)} symbols=${field(root.symbols)} refs=${field(root.references)} deps=${field(root.dependencies)} calls=${field(root.calls)} tests=${field(root.tests)}  build=${str(root.buildFingerprintPrefix, '-')}  surface=${field(root.surfaceEntries)}`,
     );
     if (Array.isArray(root.staleReason) && root.staleReason.length > 0) {
       lines.push(`  staleReason ${root.staleReason.map((entry) => String(entry)).join(', ')}`);
@@ -284,12 +284,238 @@ function depsLines(data: Row): string[] {
   return lines;
 }
 
+function impactLines(data: Row): string[] {
+  const lines: string[] = [];
+  const risk = asRecord(data.risk);
+  const target = asRecord(data.target);
+  lines.push(
+    `risk ${str(risk?.level, 'Low')}  target ${str(target?.kind, 'file')} ${str(target?.filePath, str(target?.name, '-'))}  fanout=${field(data.impactFanout)}`,
+  );
+  for (const reason of Array.isArray(risk?.reasons) ? risk.reasons : []) {
+    const record = asRecord(reason);
+    if (record === null) continue;
+    lines.push(`  reason ${str(record.rule)}  ${str(record.detail)}`);
+  }
+  const direct = asRecord(data.direct);
+  const indirect = asRecord(data.indirect);
+  lines.push(
+    `direct ${field(direct?.count)}  indirect ${field(indirect?.count)} depth=${field(indirect?.depth)}`,
+  );
+  for (const [label, section] of [
+    ['direct', direct],
+    ['indirect', indirect],
+  ] as const) {
+    const items = Array.isArray(section?.items) ? section.items : [];
+    for (const entry of items.slice(0, 100)) {
+      const item = asRecord(entry);
+      if (item === null) continue;
+      const relationClass = str(item.relationClass, 'certain');
+      const prefix =
+        relationClass === 'dynamic-unresolved' ? '!' : relationClass === 'heuristic' ? '?' : ' ';
+      lines.push(
+        `${prefix} ${label} ${str(item.kind)} ${str(item.path)}:${field(item.line)}:${field(item.col)} ${str(item.name, str(item.symbolId, '-'))} ${str(item.reason)} ${relationClass} ${str(item.confidence)}`,
+      );
+    }
+  }
+  const surface = asRecord(data.surface);
+  if (surface !== null) {
+    lines.push(
+      `surface diffLevel=${str(surface.diffLevel)} basis=${str(surface.basis)} entries=${Array.isArray(surface.affected) ? surface.affected.length : 0}`,
+    );
+    for (const entry of Array.isArray(surface.affected) ? surface.affected.slice(0, 20) : []) {
+      const item = asRecord(entry);
+      if (item === null) continue;
+      lines.push(
+        `  surface ${str(item.name)} evidence=${str(item.primaryEvidenceSource)} exportKind=${str(item.exportKind)}`,
+      );
+    }
+  }
+  for (const [key, label] of [
+    ['components', 'component'],
+    ['types', 'type'],
+  ] as const) {
+    const section = asRecord(data[key]);
+    const items = Array.isArray(section?.affected) ? section.affected : [];
+    for (const entry of items.slice(0, 20)) {
+      const item = asRecord(entry);
+      if (item === null) continue;
+      lines.push(`  ${label} ${str(item.name)} ${str(item.path)}:${field(item.line)}`);
+    }
+  }
+  const tests = asRecord(data.tests);
+  if (tests !== null) {
+    lines.push(`tests related=${Array.isArray(tests.related) ? tests.related.length : 0}`);
+    for (const entry of Array.isArray(tests.related) ? tests.related.slice(0, 20) : []) {
+      const item = asRecord(entry);
+      if (item === null) continue;
+      lines.push(
+        `  test ${str(item.testFile)}:${field(item.line)} ${str(item.testType)} ${str(item.relationClass)}`,
+      );
+    }
+    for (const suggestion of Array.isArray(tests.suggestedCommands)
+      ? tests.suggestedCommands
+      : []) {
+      lines.push(`  verify ${String(suggestion)}`);
+    }
+  }
+  const docs = asRecord(data.docs);
+  if (docs !== null) {
+    for (const entry of Array.isArray(docs.related) ? docs.related.slice(0, 20) : []) {
+      const item = asRecord(entry);
+      if (item === null) continue;
+      lines.push(`  doc ${str(item.path)}:${field(item.line)} ${str(item.match)}`);
+    }
+  }
+  for (const entry of Array.isArray(data.styleDependents) ? data.styleDependents : []) {
+    const item = asRecord(entry);
+    if (item === null) continue;
+    lines.push(
+      `  styleDependent ${str(item.sourceFile)}:${field(item.line)} ${str(item.depType)} ${str(item.confidence)}`,
+    );
+  }
+  for (const entry of Array.isArray(data.blindSpots) ? data.blindSpots : []) {
+    const item = asRecord(entry);
+    if (item === null) continue;
+    lines.push(
+      `blindSpot ${str(item.category)}/${str(item.missReason)} files=${field(item.affectedFiles)} symbols=${field(item.potentiallyAffectedSymbols)}`,
+    );
+  }
+  return lines;
+}
+
+function preflightLines(data: Row): string[] {
+  const lines: string[] = [];
+  const risk = asRecord(data.risk);
+  lines.push(`risk ${str(risk?.level, 'Low')}  scope=${str(data.scope)}`);
+  const similar = asRecord(data.similar);
+  if (similar !== null) {
+    lines.push(
+      `similar rules=${str(similar.rulesVersion)} candidates=${Array.isArray(similar.candidates) ? similar.candidates.length : 0} noSimilarFound=${field(similar.noSimilarFound)}`,
+    );
+    for (const entry of Array.isArray(similar.candidates) ? similar.candidates.slice(0, 20) : []) {
+      const item = asRecord(entry);
+      if (item === null) continue;
+      const candidate = asRecord(item.candidate);
+      const location = asRecord(item.location);
+      lines.push(
+        `? ${field(item.score)} ${str(candidate?.name)} ${str(location?.path)}:${field(location?.line)} suggestion=${str(item.suggestion)} basis=${Array.isArray(item.matchBasis) ? item.matchBasis.join(',') : ''}`,
+      );
+    }
+  }
+  for (const entry of Array.isArray(data.existingApis) ? data.existingApis : []) {
+    const item = asRecord(entry);
+    if (item === null) continue;
+    lines.push(
+      `existingApi ${str(item.name)} evidence=${str(item.primaryEvidenceSource)} exportKind=${str(item.exportKind)}`,
+    );
+  }
+  for (const entry of Array.isArray(data.sources) ? data.sources : []) {
+    const item = asRecord(entry);
+    if (item === null) continue;
+    lines.push(
+      `source ${str(item.path)}:${field(item.line)}:${field(item.col)} ${str(item.kind)} ${str(item.nameChain)}`,
+    );
+  }
+  const deps = asRecord(data.dependencies);
+  lines.push(`dependencies direct=${field(deps?.direct)} indirect=${field(deps?.indirect)}`);
+  for (const entry of Array.isArray(data.blindSpots) ? data.blindSpots : []) {
+    const item = asRecord(entry);
+    if (item === null) continue;
+    lines.push(
+      `blindSpot ${str(item.category)}/${str(item.missReason)} files=${field(item.affectedFiles)}`,
+    );
+  }
+  return lines;
+}
+
+function postflightLines(data: Row): string[] {
+  const lines: string[] = [];
+  lines.push(
+    `base ${str(data.base)} staleness=${str(data.staleness)} confidence=${str(data.confidence)} scope=${str(data.scope)}`,
+  );
+  const changed = asRecord(data.changed);
+  const files = Array.isArray(changed?.files) ? changed.files : [];
+  const symbols = Array.isArray(changed?.symbols) ? changed.symbols : [];
+  lines.push(
+    `changed files=${files.length} symbols=${symbols.length} unidentified=${Array.isArray(changed?.unidentified) ? changed.unidentified.length : 0}`,
+  );
+  for (const entry of files.slice(0, 50)) {
+    const item = asRecord(entry);
+    if (item === null) continue;
+    lines.push(
+      `${str(item.status)} ${str(item.path)} symbols=${field(item.symbols)} lines=${field(item.lines)}`,
+    );
+  }
+  for (const entry of symbols.slice(0, 100)) {
+    const item = asRecord(entry);
+    if (item === null) continue;
+    lines.push(
+      `${str(item.change)} ${str(item.kind)} ${str(item.path)}:${field(item.line)} ${str(item.nameChain ?? item.name)} ${str(item.symbolId, '-')}`,
+    );
+  }
+  for (const entry of Array.isArray(data.findings) ? data.findings : []) {
+    const item = asRecord(entry);
+    if (item === null) continue;
+    lines.push(
+      `${str(item.severity)} ${str(item.code)} ${str(item.origin)} ${str(item.file)}:${field(item.line)} ${str(item.suggestion)}`,
+    );
+  }
+  const surface = asRecord(data.surfaceDiff);
+  if (surface !== null) {
+    lines.push(
+      `surface breaking=${Array.isArray(surface.breaking) ? surface.breaking.length : 0} additive=${Array.isArray(surface.additive) ? surface.additive.length : 0} ambiguous=${Array.isArray(surface.ambiguous) ? surface.ambiguous.length : 0} internal=${Array.isArray(surface.internal) ? surface.internal.length : 0}`,
+    );
+  }
+  for (const entry of Array.isArray(data.dependencyChanges) ? data.dependencyChanges : []) {
+    const item = asRecord(entry);
+    if (item === null) continue;
+    lines.push(
+      `deps ${str(item.file)} +${Array.isArray(item.added) ? item.added.join(',') : ''} -${Array.isArray(item.removed) ? item.removed.join(',') : ''}`,
+    );
+  }
+  const verification = asRecord(data.verification);
+  if (verification !== null) {
+    for (const entry of Array.isArray(verification.commands) ? verification.commands : []) {
+      const item = asRecord(entry);
+      if (item === null) continue;
+      lines.push(
+        `verify ${str(item.id)} ${str(item.status)} exit=${field(item.exitCode)} ${field(item.durationMs)}ms ${str(item.cmd)} ${Array.isArray(item.args) ? item.args.join(' ') : ''}`,
+      );
+    }
+    for (const entry of Array.isArray(verification.skipped) ? verification.skipped : []) {
+      const item = asRecord(entry);
+      if (item === null) continue;
+      lines.push(`verify ${str(item.id)} skipped ${str(item.reason)}`);
+    }
+  }
+  const exit = asRecord(data.exit);
+  lines.push(
+    `exit code=${field(exit?.code)} blocking=${field(exit?.blocking)} warnings=${field(exit?.warnings)} failOn=${str(exit?.failOn)}`,
+  );
+  return lines;
+}
+
+function verifyLines(data: Row): string[] {
+  return (Array.isArray(data.commands) ? data.commands : []).map((entry) => {
+    const item = asRecord(entry) ?? {};
+    return `${str(item.status)} ${str(item.id)} exit=${field(item.exitCode)} ${field(item.durationMs)}ms ${str(item.cmd)} ${Array.isArray(item.args) ? item.args.join(' ') : ''} cwd=${str(item.cwd)} timeout=${field(item.timeoutMs)}ms auth=${str(item.authorization)}`;
+  });
+}
+
 function entriesFor(command: string, data: Row): string[] {
   switch (command) {
     case 'references':
       return referenceLines(data);
     case 'deps':
       return depsLines(data);
+    case 'impact':
+      return impactLines(data);
+    case 'preflight':
+      return preflightLines(data);
+    case 'postflight':
+      return postflightLines(data);
+    case 'verify':
+      return verifyLines(data);
     case 'symbol':
     case 'search':
       return symbolLines(data);
@@ -316,7 +542,22 @@ function validateLineLength(lines: string[], _width: number): void {
 }
 
 export function renderLines(input: RenderInput): string {
-  const entries = entriesFor(input.command, input.data);
+  const groups = Array.isArray(input.data.byRoot) ? input.data.byRoot : [];
+  const entries =
+    groups.length > 1
+      ? groups.flatMap((group) => {
+          const record = asRecord(group) ?? {};
+          const rootId = str(record.rootId);
+          const groupData = {
+            ...input.data,
+            ...record,
+            counts: record.counts,
+            coverage: record.coverage,
+            items: record.items,
+          };
+          return entriesFor(input.command, groupData).map((line) => `[${rootId}] ${line}`);
+        })
+      : entriesFor(input.command, input.data);
   const summary = footer(input.data);
   const notes = Array.isArray(input.data.notes)
     ? input.data.notes.map((entry) => `note ${String(entry)}`)
@@ -336,6 +577,28 @@ function markdownTable(headers: string[], rows: string[][]): string {
 
 export function renderMarkdown(input: RenderInput): string {
   const { command, data } = input;
+  const groups = Array.isArray(data.byRoot) ? data.byRoot : [];
+  if (groups.length > 1) {
+    const sections: string[] = [`# nex ${command}`, ''];
+    for (const group of groups) {
+      const record = asRecord(group) ?? {};
+      const groupData = {
+        ...data,
+        ...record,
+        counts: record.counts,
+        coverage: record.coverage,
+        items: record.items,
+        byRoot: undefined,
+        notes: record.notes,
+      };
+      const rendered = renderMarkdown({ command, data: groupData }).split('\n');
+      const body = rendered.slice(1).join('\n').replace(/^\n+/, '');
+      sections.push(`## Root ${str(record.rootId)} (${str(record.staleness)})`, '', body, '');
+    }
+    const notes = Array.isArray(data.notes) ? data.notes.map((entry) => String(entry)) : [];
+    if (notes.length > 0) sections.push('## Notes', '', ...notes.map((entry) => `- ${entry}`), '');
+    return sections.join('\n').trimEnd();
+  }
   const lines: string[] = [`# nex ${command}`, ''];
   const summary = summaryFields(data);
   if (summary.length > 0) {
@@ -502,6 +765,11 @@ export function renderMarkdown(input: RenderInput): string {
       markdownTable(['Root', 'OK', 'Symbols', 'References', 'ms', 'Build/Error'], rows),
       '',
     );
+  } else if (['impact', 'preflight', 'postflight', 'verify'].includes(command)) {
+    const details = entriesFor(command, data);
+    if (details.length > 0) {
+      lines.push('## Details', '', '```text', ...details.slice(0, 500), '```', '');
+    }
   }
   const notes = Array.isArray(data.notes) ? data.notes.map((entry) => String(entry)) : [];
   if (notes.length > 0) lines.push('## Notes', '', ...notes.map((entry) => `- ${entry}`), '');
@@ -528,6 +796,14 @@ function conclusion(command: string, data: Row): string {
       return `API baseline: ${str(data.path, '-')} (${field(asRecord(data.counts)?.entries ?? 0)} entries)`;
     case 'api-diff':
       return `API diff: ${field(asRecord(data.counts)?.breaking ?? 0)} breaking, ${field(asRecord(data.counts)?.additive ?? 0)} additive, ${field(asRecord(data.counts)?.ambiguous ?? 0)} ambiguous`;
+    case 'impact':
+      return `Impact: risk ${str(asRecord(data.risk)?.level, 'Low')}, ${field(asRecord(data.direct)?.count ?? 0)} direct / ${field(asRecord(data.indirect)?.count ?? 0)} indirect, staleness ${str(data.staleness, 'fresh')}`;
+    case 'preflight':
+      return `Preflight: risk ${str(asRecord(data.risk)?.level, 'Low')}, ${Array.isArray(asRecord(data.similar)?.candidates) ? (asRecord(data.similar)?.candidates as unknown[]).length : 0} similar candidate(s)`;
+    case 'postflight':
+      return `Postflight: ${field(asRecord(data.counts)?.total ?? 0)} changed symbol(s), confidence ${str(data.confidence)}, exit ${field(asRecord(data.exit)?.code ?? 0)}`;
+    case 'verify':
+      return `Verify: ${field(asRecord(data.counts)?.total ?? 0)} command(s), ${field(data.failed ?? 0)} failed`;
     case 'init':
       return `Init: ${field(data.written) === 'true' ? 'configuration written' : 'dry run'}`;
     default:
@@ -541,10 +817,27 @@ export function renderPretty(input: RenderInput, options: RenderOptions): string
     options.color ? styleText(format, text) : text;
   const lines: string[] = [];
   lines.push(colorize(conclusion(command, data), 'bold'));
-  const entries = entriesFor(command, data);
-  if (entries.length > 0) {
-    lines.push('');
-    lines.push(...entries);
+  const groups = Array.isArray(data.byRoot) ? data.byRoot : [];
+  if (groups.length > 1) {
+    for (const group of groups) {
+      const record = asRecord(group) ?? {};
+      lines.push('');
+      lines.push(colorize(`root ${str(record.rootId)} (${str(record.staleness)})`, 'bold'));
+      const groupData = {
+        ...data,
+        ...record,
+        counts: record.counts,
+        coverage: record.coverage,
+        items: record.items,
+      };
+      lines.push(...entriesFor(command, groupData));
+    }
+  } else {
+    const entries = entriesFor(command, data);
+    if (entries.length > 0) {
+      lines.push('');
+      lines.push(...entries);
+    }
   }
   const summary = footer(data);
   if (summary !== '') {

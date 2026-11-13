@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { commandSafetyReason } from './command-safety.js';
+
 const safeRelativePattern = z
   .string()
   .min(1)
@@ -105,9 +107,22 @@ export const commandSchema = z.strictObject({
   timeoutMs: z.number().int().positive().max(600_000).default(60_000),
 });
 
-export const commandsSchema = z.strictObject({
-  allow: z.array(commandSchema).default([]),
-});
+export const commandsSchema = z
+  .strictObject({
+    allow: z.array(commandSchema).default([]),
+  })
+  .superRefine((value, context) => {
+    for (const [index, command] of value.allow.entries()) {
+      const reason = commandSafetyReason(command);
+      if (reason !== null) {
+        context.addIssue({
+          code: 'custom',
+          path: ['allow', index],
+          message: `commands.allow[${index}]: ${reason}`,
+        });
+      }
+    }
+  });
 
 export const configSchema = z.strictObject({
   configVersion: z.literal(1),

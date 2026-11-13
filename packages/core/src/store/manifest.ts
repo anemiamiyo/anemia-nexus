@@ -49,12 +49,14 @@ export interface RootManifest {
     unresolvedReferences: number;
     dependencies?: number;
     calls?: number;
+    tests?: number;
   };
   coverage: ManifestCoverage;
   vue?: VueAnalysisSummary;
   graph?: {
     dependencies: number;
     calls: number;
+    tests?: number;
     styleEdges: number;
     crossRootEdges: number;
     architectureViolations: number;

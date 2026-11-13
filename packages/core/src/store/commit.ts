@@ -69,6 +69,7 @@ export interface CommitResult {
     references: number;
     dependencies: number;
     calls: number;
+    tests: number;
   };
   writeBatches: number;
   rowsWritten: number;
@@ -175,6 +176,7 @@ export function recoverPending(dbPath: string): number {
         db.prepare('delete from symbol_map where build_id = ?').run(buildId);
         db.prepare('delete from components where build_id = ?').run(buildId);
         db.prepare('delete from vue_file_meta where build_id = ?').run(buildId);
+        db.prepare('delete from tests where build_id = ?').run(buildId);
         db.prepare('delete from symbols where build_id = ?').run(buildId);
         db.prepare('delete from files where build_id = ?').run(buildId);
         db.prepare('delete from build_record where build_id = ?').run(buildId);
@@ -217,6 +219,7 @@ function pruneBuilds(db: DatabaseSync, keep = 2): void {
       db.prepare('delete from symbol_map where build_id = ?').run(buildId);
       db.prepare('delete from components where build_id = ?').run(buildId);
       db.prepare('delete from vue_file_meta where build_id = ?').run(buildId);
+      db.prepare('delete from tests where build_id = ?').run(buildId);
       db.prepare('delete from symbols where build_id = ?').run(buildId);
       db.prepare('delete from files where build_id = ?').run(buildId);
       db.prepare('delete from build_record where build_id = ?').run(buildId);
@@ -253,13 +256,25 @@ function assertClosure(db: DatabaseSync, buildId: string): void {
       'select count(*) as count from calls c left join symbols s on c.callee_symbol_id = s.symbol_id and s.build_id = c.build_id where c.build_id = ? and c.callee_symbol_id is not null and s.symbol_id is null',
     )
     .get(buildId) as { count?: unknown };
+  const orphanTestTarget = db
+    .prepare(
+      'select count(*) as count from tests t left join symbols s on t.target_symbol_id = s.symbol_id and s.build_id = t.build_id where t.build_id = ? and t.target_symbol_id is not null and s.symbol_id is null',
+    )
+    .get(buildId) as { count?: unknown };
   const targetCount = typeof orphanTarget.count === 'number' ? orphanTarget.count : -1;
   const sourceCount = typeof orphanSource.count === 'number' ? orphanSource.count : -1;
   const callerCount = typeof orphanCaller.count === 'number' ? orphanCaller.count : -1;
   const calleeCount = typeof orphanCallee.count === 'number' ? orphanCallee.count : -1;
-  if (targetCount !== 0 || sourceCount !== 0 || callerCount !== 0 || calleeCount !== 0) {
+  const testCount = typeof orphanTestTarget.count === 'number' ? orphanTestTarget.count : -1;
+  if (
+    targetCount !== 0 ||
+    sourceCount !== 0 ||
+    callerCount !== 0 ||
+    calleeCount !== 0 ||
+    testCount !== 0
+  ) {
     throw nexusError('E23', 'relation foreign keys are not closed', {
-      reason: `orphan targets: ${targetCount}, orphan sources: ${sourceCount}, orphan callers: ${callerCount}, orphan callees: ${calleeCount}`,
+      reason: `orphan targets: ${targetCount}, orphan sources: ${sourceCount}, orphan callers: ${callerCount}, orphan callees: ${calleeCount}, orphan test targets: ${testCount}`,
       suggestion:
         'Mapping produced edges to symbols that were not written; fix the indexer before release.',
     });
@@ -291,7 +306,7 @@ export class BuildWriter {
   private closed = false;
   private rows = 0;
   private batches = 0;
-  private counts = { files: 0, symbols: 0, references: 0, dependencies: 0, calls: 0 };
+  private counts = { files: 0, symbols: 0, references: 0, dependencies: 0, calls: 0, tests: 0 };
 
   private constructor(db: DatabaseSync, header: CommitInput) {
     this.db = db;
@@ -571,6 +586,62 @@ export class BuildWriter {
   }
 
   /**
+   * Derive the Test relation (docs/08-relations.md class 7, 5.1 Test entity)
+   * from already-written references and calls. SQL-only: no second full array
+   * of references is materialized. Test-file detection is intentionally fixed
+   * and explainable: `.test.` / `.spec.` / `.e2e.` or `__tests__/`.
+   */
+  private populateTests(): void {
+    const testPredicate = (column: string): string =>
+      `(instr(lower(${column}), '.test.') > 0 or instr(lower(${column}), '.spec.') > 0 or instr(lower(${column}), '.e2e.') > 0 or instr(lower(${column}), '__tests__/') > 0)`;
+    const targetFilePredicate = (column: string): string => `not ${testPredicate(column)}`;
+    const testType = (column: string): string =>
+      `case when instr(lower(${column}), '.e2e.') > 0 then 'e2e' when instr(lower(${column}), '__tests__/') > 0 or instr(lower(${column}), 'integration') > 0 then 'integration' else 'unit' end`;
+
+    this.db
+      .prepare(
+        `insert or ignore into tests(test_id, build_id, test_file, target_symbol_id, target_file, test_type, relation_class, confidence, analysis_engine, line, evidence_json)
+         select 't_ref|' || r.build_id || '|' || r.source_file || '|' || r.target_symbol_id || '|' || r.kind || '|' || r.line,
+                r.build_id, r.source_file, r.target_symbol_id, t.path,
+                ${testType('r.source_file')}, r.relation_class, r.confidence, r.analysis_engine, r.line,
+                json_object('sourceOfTruth', 'tests-relations', 'analysisVersion', 'phase05',
+                  'constraints', json_array('reference-derived'), 'missReason', null)
+         from "references" r
+         join symbols t on t.symbol_id = r.target_symbol_id and t.build_id = r.build_id
+         where r.build_id = ?
+           and r.target_symbol_id is not null
+           and r.unresolved_reason is null
+           and ${testPredicate('r.source_file')}
+           and ${targetFilePredicate('t.path')}`,
+      )
+      .run(this.header.buildId);
+
+    this.db
+      .prepare(
+        `insert or ignore into tests(test_id, build_id, test_file, target_symbol_id, target_file, test_type, relation_class, confidence, analysis_engine, line, evidence_json)
+         select 't_call|' || c.build_id || '|' || c.caller_file || '|' || c.callee_symbol_id || '|' || c.line,
+                c.build_id, c.caller_file, c.callee_symbol_id, t.path,
+                ${testType('c.caller_file')}, c.relation_class, c.confidence, c.analysis_engine, c.line,
+                json_object('sourceOfTruth', 'tests-relations', 'analysisVersion', 'phase05',
+                  'constraints', json_array('call-derived'), 'missReason', null)
+         from calls c
+         join symbols t on t.symbol_id = c.callee_symbol_id and t.build_id = c.build_id
+         where c.build_id = ?
+           and c.callee_symbol_id is not null
+           and c.unresolved_reason is null
+           and ${testPredicate('c.caller_file')}
+           and ${targetFilePredicate('t.path')}`,
+      )
+      .run(this.header.buildId);
+
+    const row = this.db
+      .prepare('select count(*) as count from tests where build_id = ?')
+      .get(this.header.buildId) as { count?: unknown };
+    this.counts.tests = typeof row.count === 'number' ? row.count : 0;
+    this.rows += this.counts.tests;
+  }
+
+  /**
    * History maintenance without a JS `Set` of every symbol: the current build's
    * ids already live in `temp.current_symbols`, so retire/insert are SQL-only.
    */
@@ -606,6 +677,7 @@ export class BuildWriter {
   seal(): CommitResult {
     const { db, header } = this;
     try {
+      this.populateTests();
       this.applyHistory();
       assertClosure(db, header.buildId);
       const indexes = requiredIndexesPresent(db);

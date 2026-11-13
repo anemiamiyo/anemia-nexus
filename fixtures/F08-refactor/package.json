@@ -1,0 +1,12 @@
+{
+  "name": "@fixture/refactor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/overlay.ts",
+      "import": "./src/overlay.ts"
+    }
+  }
+}

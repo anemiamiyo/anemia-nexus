@@ -7,12 +7,14 @@ import type {
   DependencyRecord,
   QueryEnvelope,
   ReferenceRecord,
+  RootGroup,
   StalenessState,
   SymbolRecord,
 } from '../model.js';
 import { nexusError } from '../errors.js';
 import { loadConfig, type LoadedConfig } from '../config/load.js';
 import { statusReport, type RootStatus, type StatusReport, type WarningItem } from '../status.js';
+import { resolveQueryScope, type ScopeSelection } from './routing.js';
 import { databasePath, manifestPath, readManifest } from '../store/manifest.js';
 import {
   findSymbolsByName,
@@ -97,7 +99,7 @@ export interface ReferenceItem {
 
 export type SearchItem = SymbolItem;
 
-interface PreparedContext {
+export interface PreparedContext {
   status: StatusReport;
   loadedConfig: LoadedConfig | null;
   roots: RootStatus[];
@@ -105,7 +107,7 @@ interface PreparedContext {
   budget: { layer: string; maxTokens: number | null; maxFiles: number | null };
 }
 
-async function prepareContext(options: QueryOptions): Promise<PreparedContext> {
+export async function prepareContext(options: QueryOptions): Promise<PreparedContext> {
   let loadedConfig: LoadedConfig | null = null;
   const warnings: WarningItem[] = [];
   try {
@@ -149,74 +151,17 @@ async function prepareContext(options: QueryOptions): Promise<PreparedContext> {
   };
 }
 
-function selectRoots(context: PreparedContext, options: QueryOptions): RootStatus[] {
-  if (context.status.state === 'uninitialized') {
-    throw nexusError('E01', 'index does not exist', {
-      reason: 'no completed build was found under .nexus/',
-      suggestion: 'Run `nex init --yes` and `nex build`.',
-    });
-  }
-  const explicitAll = options.roots === 'all';
-  const explicitList =
-    typeof options.roots === 'string' && options.roots !== 'all'
-      ? options.roots
-          .split(',')
-          .map((entry) => entry.trim())
-          .filter((entry) => entry !== '')
-      : null;
+export function selectScope(context: PreparedContext, options: QueryOptions): ScopeSelection {
+  return resolveQueryScope(context.status, {
+    projectRoot: options.projectRoot,
+    rootId: options.rootId,
+    roots: options.roots,
+    cwd: options.cwd,
+  });
+}
 
-  if (explicitAll) {
-    const usable = context.roots.filter((root) => root.staleness !== 'failed');
-    if (usable.length === 0) {
-      throw nexusError('E19', 'no root is queryable', {
-        reason: 'all roots are failed',
-        suggestion: 'Run `nex doctor` and rebuild.',
-      });
-    }
-    return usable;
-  }
-  if (explicitList !== null && explicitList.length > 0) {
-    const selected: RootStatus[] = [];
-    for (const rootId of explicitList) {
-      const found = context.roots.find((root) => root.rootId === rootId);
-      if (found === undefined) {
-        throw nexusError('E16', 'root id not found', {
-          reason: `unknown root: ${rootId}`,
-          suggestion: 'Use one of the roots listed by `nex status`.',
-          evidence: { candidates: context.roots.map((root) => root.rootId) },
-        });
-      }
-      selected.push(found);
-    }
-    return selected;
-  }
-  if (options.rootId !== undefined && options.rootId !== null && options.rootId !== '') {
-    const found = context.roots.find((root) => root.rootId === options.rootId);
-    if (found === undefined) {
-      throw nexusError('E16', 'root id not found', {
-        reason: `unknown root: ${options.rootId}`,
-        suggestion: 'Use one of the roots listed by `nex status`.',
-        evidence: { candidates: context.roots.map((root) => root.rootId) },
-      });
-    }
-    return [found];
-  }
-  if (context.status.activeRoot === null) {
-    throw nexusError('E16', 'working directory does not belong to a single root', {
-      reason: 'cwd is at the workspace root or outside every indexed root',
-      suggestion: 'Pass --root <rootId> or --roots <id,id>.',
-      evidence: { candidates: context.roots.map((root) => root.rootId) },
-    });
-  }
-  const active = context.roots.find((root) => root.rootId === context.status.activeRoot);
-  if (active === undefined) {
-    throw nexusError('E16', 'active root is not indexed', {
-      reason: `active root ${context.status.activeRoot} has no index`,
-      suggestion: 'Pass --root explicitly or rebuild.',
-      evidence: { candidates: context.roots.map((root) => root.rootId) },
-    });
-  }
-  return [active];
+export function selectRoots(context: PreparedContext, options: QueryOptions): RootStatus[] {
+  return selectScope(context, options).roots;
 }
 
 function worstStaleness(roots: readonly RootStatus[]): StalenessState {
@@ -396,6 +341,9 @@ function envelope<T>(input: {
   budget: PreparedContext['budget'];
   notes: string[];
   mode: 'normal' | 'syntax-only' | 'scoped';
+  scope?: ScopeSelection;
+  byRoot?: RootGroup<T>[];
+  globalAmbiguous?: boolean;
 }): QueryEnvelope<T> {
   const total = input.items.length;
   const counts: Counts = {
@@ -406,7 +354,7 @@ function envelope<T>(input: {
     dynamicUnresolved: 0,
     partial: input.staleness === 'fresh' ? 0 : total,
   };
-  return {
+  const result: QueryEnvelope<T> = {
     command: input.command,
     rootId: input.roots.length === 1 ? (input.roots[0]?.rootId ?? null) : null,
     counts,
@@ -423,6 +371,98 @@ function envelope<T>(input: {
     mode: input.mode,
     notes: input.notes,
   };
+  if (input.scope !== undefined) {
+    result.scope = input.scope.scope;
+    result.staleRoots = input.scope.staleRoots;
+    result.failedRoots = input.scope.failedRoots;
+    result.completeness =
+      input.scope.staleRoots.length === 0 && input.scope.failedRoots.length === 0
+        ? 'complete'
+        : 'partial';
+  }
+  if (input.byRoot !== undefined) result.byRoot = input.byRoot;
+  if (input.globalAmbiguous === true) result.globalAmbiguous = true;
+  return result;
+}
+
+function modeFor(roots: readonly RootStatus[]): 'normal' | 'syntax-only' {
+  return roots.some((root) => root.degraded.includes('syntax-only')) ? 'syntax-only' : 'normal';
+}
+
+function coverageForRoot(root: RootStatus): Coverage {
+  return {
+    ...root.coverage,
+    filteredInternal: root.coverage.filteredInternal ?? 0,
+  };
+}
+
+function rootGroup<T>(
+  root: RootStatus,
+  items: T[],
+  counts: Counts,
+  notes: string[] = [],
+): RootGroup<T> {
+  return {
+    rootId: root.rootId,
+    rootPath: root.rootPath,
+    staleness: root.staleness,
+    buildFingerprint: root.buildFingerprint,
+    counts: { ...counts, total: items.length, returned: items.length },
+    coverage: coverageForRoot(root),
+    items,
+    truncated: false,
+    nextCursor: null,
+    notes,
+  };
+}
+
+function groupedEnvelope<T>(input: {
+  command: string;
+  selection: ScopeSelection;
+  groups: Array<RootGroup<T>>;
+  warnings: WarningItem[];
+  budget: PreparedContext['budget'];
+  notes: string[];
+  mode: 'normal' | 'syntax-only' | 'scoped';
+  globalAmbiguous?: boolean;
+}): QueryEnvelope<T> {
+  const roots = input.selection.roots;
+  const items = input.groups.flatMap((group) => group.items);
+  const notes = [
+    ...input.notes,
+    ...(input.selection.nestedRootIds.length > 0
+      ? [
+          `cwd is inside nested roots ${[
+            input.selection.activeRoot ?? '',
+            ...input.selection.nestedRootIds,
+          ]
+            .filter((entry) => entry !== '')
+            .join(', ')}; the longest root path wins`,
+        ]
+      : []),
+  ];
+  const result = envelope({
+    command: input.command,
+    roots,
+    items,
+    coverage: aggregateCoverage(roots),
+    staleness: worstStaleness(roots),
+    buildFingerprint: roots.length === 1 ? (roots[0]?.buildFingerprint ?? null) : null,
+    warnings: input.warnings,
+    budget: input.budget,
+    notes,
+    mode: input.mode,
+    scope: input.selection,
+    byRoot: roots.length > 1 ? input.groups : undefined,
+    globalAmbiguous: input.globalAmbiguous,
+  });
+  for (const group of input.groups) {
+    result.counts.certain += group.counts.certain;
+    result.counts.heuristic += group.counts.heuristic;
+    result.counts.dynamicUnresolved += group.counts.dynamicUnresolved;
+    result.counts.partial += group.counts.partial;
+  }
+  return result;
 }
 
 export interface SymbolQueryResult {
@@ -436,47 +476,71 @@ export async function querySymbol(
   withHistory: boolean,
 ): Promise<SymbolQueryResult> {
   const context = await prepareContext(options);
-  const roots = selectRoots(context, options);
-  if (roots.length !== 1) {
-    throw nexusError('E24', 'multi-root symbol queries are not provided in Phase 01', {
-      reason: 'symbol lookup assumes a single root',
-      suggestion: 'Pass --root <rootId>.',
+  const selection = selectScope(context, options);
+  const roots = selection.roots;
+  const groups: Array<RootGroup<SymbolItem>> = [];
+  const notes: string[] = [];
+  let firstSymbol: SymbolRecord | null = null;
+  for (const root of roots) {
+    const store = openReadStore(databasePath(options.projectRoot, root.rootId));
+    if (store === null) {
+      notes.push(`root ${root.rootId}: no committed index`);
+      continue;
+    }
+    try {
+      let symbol: SymbolRecord;
+      try {
+        symbol = resolveSymbol(store, identifier);
+      } catch (error) {
+        if (roots.length === 1) throw error;
+        notes.push(
+          `root ${root.rootId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        continue;
+      }
+      const item = toSymbolItem(
+        store,
+        root.rootId,
+        symbol,
+        withHistory,
+        loadSurfaceLookup(options.projectRoot, root.rootId, context),
+      );
+      firstSymbol ??= symbol;
+      groups.push(
+        rootGroup(root, [item], {
+          total: 1,
+          returned: 1,
+          certain: 1,
+          heuristic: 0,
+          dynamicUnresolved: 0,
+          partial: root.staleness === 'fresh' ? 0 : 1,
+        }),
+      );
+    } finally {
+      store.db.close();
+    }
+  }
+  if (firstSymbol === null) {
+    throw nexusError('E05', 'symbol does not exist', {
+      reason: `no symbol named ${identifier} in the selected roots`,
+      suggestion: 'Run `nex search <name>` or pass another --root.',
+      evidence: { roots: roots.map((root) => root.rootId) },
     });
   }
-  const root = roots[0] as RootStatus;
-  const store = openReadStore(databasePath(options.projectRoot, root.rootId));
-  if (store === null) {
-    throw nexusError('E01', 'index does not exist', {
-      reason: 'no committed build in index.db',
-      suggestion: 'Run `nex build`.',
-      evidence: { rootId: root.rootId },
-    });
-  }
-  try {
-    const symbol = resolveSymbol(store, identifier);
-    const item = toSymbolItem(
-      store,
-      root.rootId,
-      symbol,
-      withHistory,
-      loadSurfaceLookup(options.projectRoot, root.rootId, context),
-    );
-    const result = envelope({
-      command: 'symbol',
-      roots,
-      items: [item],
-      coverage: aggregateCoverage(roots),
-      staleness: worstStaleness(roots),
-      buildFingerprint: root.buildFingerprint,
-      warnings: context.warnings,
-      budget: context.budget,
-      notes: [],
-      mode: root.degraded.includes('syntax-only') ? 'syntax-only' : 'normal',
-    });
-    return { envelope: result, symbol };
-  } finally {
-    store.db.close();
-  }
+  const result = groupedEnvelope({
+    command: 'symbol',
+    selection,
+    groups,
+    warnings: context.warnings,
+    budget: context.budget,
+    notes,
+    mode: modeFor(selection.roots),
+    globalAmbiguous: groups.length > 1,
+  });
+  result.identityAmbiguous = groups.some((group) =>
+    group.items.some((item) => item.volatile && item.identityConfidence !== 'high'),
+  );
+  return { envelope: result, symbol: firstSymbol };
 }
 
 export interface ReferencesQueryResult {
@@ -491,67 +555,84 @@ export async function queryReferences(
   includeTemplate = true,
 ): Promise<ReferencesQueryResult> {
   const context = await prepareContext(options);
-  const roots = selectRoots(context, options);
-  if (roots.length !== 1) {
-    throw nexusError('E24', 'multi-root reference queries are not provided in Phase 01', {
-      reason: 'reference sets are not merged across roots',
-      suggestion: 'Pass --root <rootId>.',
+  const selection = selectScope(context, options);
+  const roots = selection.roots;
+  const groups: Array<RootGroup<ReferenceItem>> = [];
+  const notes: string[] = [];
+  let firstSymbol: SymbolRecord | null = null;
+  for (const root of roots) {
+    const store = openReadStore(databasePath(options.projectRoot, root.rootId));
+    if (store === null) {
+      notes.push(`root ${root.rootId}: no committed index`);
+      continue;
+    }
+    try {
+      let symbol: SymbolRecord;
+      try {
+        symbol = resolveSymbol(store, identifier);
+      } catch (error) {
+        if (roots.length === 1) throw error;
+        notes.push(
+          `root ${root.rootId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        continue;
+      }
+      firstSymbol ??= symbol;
+      const rows = readReferencesTo(store, symbol.symbolId).filter(
+        (row) =>
+          (includeHeuristic || row.relationClass !== 'heuristic') &&
+          (includeTemplate || !row.role.startsWith('template:')),
+      );
+      const items: ReferenceItem[] = rows.map((row) => ({
+        rootId: root.rootId,
+        path: row.sourceFile,
+        line: row.line,
+        col: row.col,
+        kind: row.kind,
+        symbolId: symbol.symbolId,
+        symbolName: symbol.nameChain,
+        sourceSymbolId: row.sourceSymbolId,
+        sourceName: row.sourceName,
+        reason: reasonFor(row, symbol),
+        relationClass: row.relationClass,
+        confidence: row.confidence,
+        role: row.role,
+        analysisEngine: row.analysisEngine,
+      }));
+      groups.push(
+        rootGroup(root, items, {
+          total: items.length,
+          returned: items.length,
+          certain: rows.filter((row) => row.relationClass === 'certain').length,
+          heuristic: rows.filter((row) => row.relationClass === 'heuristic').length,
+          dynamicUnresolved: rows.filter((row) => row.relationClass === 'dynamic-unresolved')
+            .length,
+          partial: root.staleness === 'fresh' ? 0 : items.length,
+        }),
+      );
+    } finally {
+      store.db.close();
+    }
+  }
+  if (firstSymbol === null) {
+    throw nexusError('E05', 'symbol does not exist', {
+      reason: `no symbol named ${identifier} in the selected roots`,
+      suggestion: 'Run `nex search <name>` or pass another --root.',
+      evidence: { roots: roots.map((root) => root.rootId) },
     });
   }
-  const root = roots[0] as RootStatus;
-  const store = openReadStore(databasePath(options.projectRoot, root.rootId));
-  if (store === null) {
-    throw nexusError('E01', 'index does not exist', {
-      reason: 'no committed build in index.db',
-      suggestion: 'Run `nex build`.',
-      evidence: { rootId: root.rootId },
-    });
-  }
-  try {
-    const symbol = resolveSymbol(store, identifier);
-    const rows = readReferencesTo(store, symbol.symbolId).filter(
-      (row) =>
-        (includeHeuristic || row.relationClass !== 'heuristic') &&
-        (includeTemplate || !row.role.startsWith('template:')),
-    );
-    const items: ReferenceItem[] = rows.map((row) => ({
-      rootId: root.rootId,
-      path: row.sourceFile,
-      line: row.line,
-      col: row.col,
-      kind: row.kind,
-      symbolId: symbol.symbolId,
-      symbolName: symbol.nameChain,
-      sourceSymbolId: row.sourceSymbolId,
-      sourceName: row.sourceName,
-      reason: reasonFor(row, symbol),
-      relationClass: row.relationClass,
-      confidence: row.confidence,
-      role: row.role,
-      analysisEngine: row.analysisEngine,
-    }));
-    const result = envelope({
-      command: 'references',
-      roots,
-      items,
-      coverage: aggregateCoverage(roots),
-      staleness: worstStaleness(roots),
-      buildFingerprint: root.buildFingerprint,
-      warnings: context.warnings,
-      budget: context.budget,
-      notes: includeTemplate ? [] : ['template edges are not included (--no-template)'],
-      mode: root.degraded.includes('syntax-only') ? 'syntax-only' : 'normal',
-    });
-    result.counts.certain = rows.filter((row) => row.relationClass === 'certain').length;
-    result.counts.heuristic = rows.filter((row) => row.relationClass === 'heuristic').length;
-    result.counts.dynamicUnresolved = rows.filter(
-      (row) => row.relationClass === 'dynamic-unresolved',
-    ).length;
-    result.identityAmbiguous = symbol.volatile && symbol.identityConfidence !== 'high';
-    return { envelope: result, symbol };
-  } finally {
-    store.db.close();
-  }
+  const result = groupedEnvelope({
+    command: 'references',
+    selection,
+    groups,
+    warnings: context.warnings,
+    budget: context.budget,
+    notes: includeTemplate ? notes : [...notes, 'template edges are not included (--no-template)'],
+    mode: modeFor(selection.roots),
+    globalAmbiguous: groups.length > 1,
+  });
+  result.identityAmbiguous = firstSymbol.volatile && firstSymbol.identityConfidence !== 'high';
+  return { envelope: result, symbol: firstSymbol };
 }
 
 export interface SearchQueryResult {
@@ -565,10 +646,11 @@ export async function querySearch(
   filters: { kind?: string; pathPrefix?: string; publicOnly?: boolean },
 ): Promise<SearchQueryResult> {
   const context = await prepareContext(options);
-  const roots = selectRoots(context, options);
-  const items: SearchItem[] = [];
+  const selection = selectScope(context, options);
+  const groups: Array<RootGroup<SearchItem>> = [];
   const notes: string[] = [];
-  for (const root of roots) {
+  const namesByRoot = new Map<string, Set<string>>();
+  for (const root of selection.roots) {
     const store = openReadStore(databasePath(options.projectRoot, root.rootId));
     if (store === null) {
       notes.push(`root ${root.rootId}: no committed index`);
@@ -582,40 +664,54 @@ export async function querySearch(
         publicOnly: filters.publicOnly,
       });
       const lookup = loadSurfaceLookup(options.projectRoot, root.rootId, context);
-      for (const symbol of symbols) {
-        items.push(toSymbolItem(store, root.rootId, symbol, false, lookup));
-      }
-      if (symbols.length === 0) {
+      const items = symbols.map((symbol) =>
+        toSymbolItem(store, root.rootId, symbol, false, lookup),
+      );
+      items.sort((left, right) => {
+        if (left.name !== right.name) return left.name < right.name ? -1 : 1;
+        if (left.path !== right.path) return left.path < right.path ? -1 : 1;
+        return left.startLine - right.startLine;
+      });
+      namesByRoot.set(root.rootId, new Set(items.map((item) => `${item.name}\u0000${item.kind}`)));
+      groups.push(
+        rootGroup(root, items, {
+          total: items.length,
+          returned: items.length,
+          certain: items.length,
+          heuristic: 0,
+          dynamicUnresolved: 0,
+          partial: root.staleness === 'fresh' ? 0 : items.length,
+        }),
+      );
+      if (items.length === 0) {
         notes.push(`root ${root.rootId}: no matches within the covered files`);
       }
     } finally {
       store.db.close();
     }
   }
-  items.sort((left, right) => {
-    if (left.rootId !== right.rootId) return left.rootId < right.rootId ? -1 : 1;
-    if (left.name !== right.name) return left.name < right.name ? -1 : 1;
-    if (left.path !== right.path) return left.path < right.path ? -1 : 1;
-    return left.startLine - right.startLine;
-  });
-  const buildFingerprint = roots.length === 1 ? (roots[0]?.buildFingerprint ?? null) : null;
-  if (roots.length > 1)
+  if (selection.roots.length > 1) {
     notes.push('multiple roots: buildFingerprint is omitted; see status.roots[]');
-  return {
-    envelope: envelope({
-      command: 'search',
-      roots,
-      items,
-      coverage: aggregateCoverage(roots),
-      staleness: worstStaleness(roots),
-      buildFingerprint,
-      warnings: context.warnings,
-      budget: context.budget,
-      notes,
-      mode: 'normal',
-    }),
+  }
+  const seen = new Set<string>();
+  let globalAmbiguous = false;
+  for (const names of namesByRoot.values()) {
+    for (const name of names) {
+      if (seen.has(name)) globalAmbiguous = true;
+      seen.add(name);
+    }
+  }
+  const result = groupedEnvelope({
+    command: 'search',
+    selection,
+    groups,
+    warnings: context.warnings,
+    budget: context.budget,
     notes,
-  };
+    mode: modeFor(selection.roots),
+    globalAmbiguous,
+  });
+  return { envelope: result, notes };
 }
 
 export function manifestFor(projectRoot: string, rootId: string): ReturnType<typeof readManifest> {
@@ -665,6 +761,7 @@ export interface DependencyQueryResult {
       allow: string[] | null;
       fileCount: number;
       symbolCount: number;
+      rootId?: string;
     }>;
     violations: unknown[];
     blindSpots: unknown[];
@@ -702,39 +799,32 @@ function dependencyItem(rootId: string, dependency: DependencyRecord): Dependenc
   };
 }
 
-export async function queryDependencies(
-  options: QueryOptions,
+interface DependencyRootAnalysis {
+  items: DependencyItem[];
+  modules: DependencyQueryResult['data']['modules'];
+  violations: unknown[];
+  blindSpots: unknown[];
+  crossRootEdges: unknown[];
+  notes: string[];
+  certain: number;
+  heuristic: number;
+  dynamicUnresolved: number;
+}
+
+function analyzeDepsForRoot(
+  projectRoot: string,
+  root: RootStatus,
   target: string,
   type: DependencyQueryType,
   reverse: boolean,
-): Promise<DependencyQueryResult> {
-  if (!['file', 'module', 'style', 'call'].includes(type)) {
-    throw nexusError('E00', 'invalid deps type', {
-      reason: `expected file, module, style or call, received ${JSON.stringify(type)}`,
-      suggestion: 'Use --type file|module|style|call.',
-    });
-  }
-  if (target.trim() === '') {
-    throw nexusError('E00', 'deps requires a target', {
-      reason: 'no file, module, style file or symbol was provided',
-      suggestion: 'Run `nex deps <file>` or `nex deps --type module <name>`.',
-    });
-  }
-  const context = await prepareContext(options);
-  const roots = selectRoots(context, options);
-  if (roots.length !== 1) {
-    throw nexusError('E24', 'multi-root deps queries are not provided in Phase 04', {
-      reason:
-        'dependency graphs are per root; cross-root edges are returned with their source root',
-      suggestion: 'Pass --root <rootId>.',
-    });
-  }
-  const root = roots[0] as RootStatus;
-  const store = openReadStore(databasePath(options.projectRoot, root.rootId));
+  strictTarget: boolean,
+): DependencyRootAnalysis {
+  const store = openReadStore(databasePath(projectRoot, root.rootId));
   if (store === null) {
     throw nexusError('E01', 'index does not exist', {
       reason: 'no committed build in index.db',
       suggestion: 'Run `nex build`.',
+      evidence: { rootId: root.rootId },
     });
   }
   try {
@@ -746,12 +836,29 @@ export async function queryDependencies(
       symbolCount: module.symbolCount,
     }));
     const violations = readArchitectureViolations(store);
-    const manifest = manifestFor(options.projectRoot, root.rootId).manifest;
+    const manifest = manifestFor(projectRoot, root.rootId).manifest;
     const blindSpots = Array.isArray(manifest?.blindSpots) ? manifest.blindSpots : [];
     const items: DependencyItem[] = [];
 
     if (type === 'call') {
-      const symbol = resolveSymbol(store, target);
+      let symbol: SymbolRecord;
+      try {
+        symbol = resolveSymbol(store, target);
+      } catch (error) {
+        if (strictTarget) throw error;
+        notes.push(`root ${root.rootId}: target symbol is not present`);
+        return {
+          items,
+          modules,
+          violations,
+          blindSpots,
+          crossRootEdges: [],
+          notes,
+          certain: 0,
+          heuristic: 0,
+          dynamicUnresolved: 0,
+        };
+      }
       const calls = readCalls(
         store,
         reverse ? { calleeSymbolId: symbol.symbolId } : { callerSymbolId: symbol.symbolId },
@@ -790,17 +897,45 @@ export async function queryDependencies(
       notes.push('call edges are static TS/TSX calls; Vue script calls are not claimed');
     } else if (type === 'module') {
       if (modules.length === 0) {
-        throw nexusError('E00', 'architecture modules are not configured', {
-          reason: 'deps --type module needs explicit architecture.modules[].include patterns',
-          suggestion: 'Add architecture.modules to .nexus/nexus.config.json and rebuild.',
-        });
+        if (strictTarget) {
+          throw nexusError('E00', 'architecture modules are not configured', {
+            reason: 'deps --type module needs explicit architecture.modules[].include patterns',
+            suggestion: 'Add architecture.modules to .nexus/nexus.config.json and rebuild.',
+          });
+        }
+        notes.push(`root ${root.rootId}: architecture modules are not configured`);
+        return {
+          items,
+          modules,
+          violations,
+          blindSpots,
+          crossRootEdges: [],
+          notes,
+          certain: 0,
+          heuristic: 0,
+          dynamicUnresolved: 0,
+        };
       }
       if (!modules.some((module) => module.name === target)) {
-        throw nexusError('E05', 'architecture module does not exist', {
-          reason: `no module named ${target}`,
-          suggestion: 'Use one of the configured module names.',
-          evidence: { modules: modules.map((module) => module.name) },
-        });
+        if (strictTarget) {
+          throw nexusError('E05', 'architecture module does not exist', {
+            reason: `no module named ${target}`,
+            suggestion: 'Use one of the configured module names.',
+            evidence: { modules: modules.map((module) => module.name) },
+          });
+        }
+        notes.push(`root ${root.rootId}: module ${target} does not exist`);
+        return {
+          items,
+          modules,
+          violations,
+          blindSpots,
+          crossRootEdges: [],
+          notes,
+          certain: 0,
+          heuristic: 0,
+          dynamicUnresolved: 0,
+        };
       }
       const all = readDependencies(store, { limit: 20000 });
       const byEdge = new Map<string, DependencyItem>();
@@ -808,7 +943,7 @@ export async function queryDependencies(
         if (dependency.sourceModule == null || dependency.targetModule == null) continue;
         if (reverse ? dependency.targetModule !== target : dependency.sourceModule !== target)
           continue;
-        const key = `${dependency.sourceModule}\\u0000${dependency.targetModule}\\u0000${dependency.depType}`;
+        const key = `${dependency.sourceModule}\u0000${dependency.targetModule}\u0000${dependency.depType}`;
         const existing = byEdge.get(key);
         if (existing === undefined) {
           byEdge.set(key, {
@@ -857,7 +992,7 @@ export async function queryDependencies(
       }
       notes.push('module edges aggregate file-level dependencies; counts are edge counts');
     } else {
-      const normalized = normalizeTargetPath(options.projectRoot, target);
+      const normalized = normalizeTargetPath(projectRoot, target);
       const all = readDependencies(store, { limit: 20000 });
       const styleOnly = type === 'style';
       for (const dependency of all) {
@@ -895,51 +1030,106 @@ export async function queryDependencies(
       if (left.col !== right.col) return left.col - right.col;
       return left.depType < right.depType ? -1 : 1;
     });
-    const result = envelope({
-      command: 'deps',
-      roots,
-      items,
-      coverage: aggregateCoverage(roots),
-      staleness: worstStaleness(roots),
-      buildFingerprint: root.buildFingerprint,
-      warnings: context.warnings,
-      budget: context.budget,
-      notes,
-      mode: root.degraded.includes('syntax-only') ? 'syntax-only' : 'normal',
-    });
-    if (type === 'module') {
-      for (const item of items) {
-        result.counts.certain +=
-          item.edgeCounts?.certain ?? (item.relationClass === 'certain' ? 1 : 0);
-        result.counts.heuristic +=
-          item.edgeCounts?.heuristic ?? (item.relationClass === 'heuristic' ? 1 : 0);
-        result.counts.dynamicUnresolved +=
-          item.edgeCounts?.dynamicUnresolved ??
-          (item.relationClass === 'dynamic-unresolved' ? 1 : 0);
-      }
-    } else {
-      result.counts.certain = items.filter((item) => item.relationClass === 'certain').length;
-      result.counts.heuristic = items.filter((item) => item.relationClass === 'heuristic').length;
-      result.counts.dynamicUnresolved = items.filter(
-        (item) => item.relationClass === 'dynamic-unresolved',
-      ).length;
+    let certain = 0;
+    let heuristic = 0;
+    let dynamicUnresolved = 0;
+    for (const item of items) {
+      certain += item.edgeCounts?.certain ?? (item.relationClass === 'certain' ? 1 : 0);
+      heuristic += item.edgeCounts?.heuristic ?? (item.relationClass === 'heuristic' ? 1 : 0);
+      dynamicUnresolved +=
+        item.edgeCounts?.dynamicUnresolved ?? (item.relationClass === 'dynamic-unresolved' ? 1 : 0);
     }
-    const crossRootEdges = items.filter(
-      (item) => item.kind === 'dependency' && item.isCrossRoot === true,
-    );
     return {
-      envelope: result,
-      type,
-      target,
-      reverse,
-      data: {
-        modules,
-        violations,
-        blindSpots,
-        crossRootEdges,
-      },
+      items,
+      modules,
+      violations,
+      blindSpots,
+      crossRootEdges: items.filter(
+        (item) => item.kind === 'dependency' && item.isCrossRoot === true,
+      ),
+      notes,
+      certain,
+      heuristic,
+      dynamicUnresolved,
     };
   } finally {
     store.db.close();
   }
+}
+
+export async function queryDependencies(
+  options: QueryOptions,
+  target: string,
+  type: DependencyQueryType,
+  reverse: boolean,
+): Promise<DependencyQueryResult> {
+  if (!['file', 'module', 'style', 'call'].includes(type)) {
+    throw nexusError('E00', 'invalid deps type', {
+      reason: `expected file, module, style or call, received ${JSON.stringify(type)}`,
+      suggestion: 'Use --type file|module|style|call.',
+    });
+  }
+  if (target.trim() === '') {
+    throw nexusError('E00', 'deps requires a target', {
+      reason: 'no file, module, style file or symbol was provided',
+      suggestion: 'Run `nex deps <file>` or `nex deps --type module <name>`.',
+    });
+  }
+  const context = await prepareContext(options);
+  const selection = selectScope(context, options);
+  const groups: Array<RootGroup<DependencyItem>> = [];
+  const notes: string[] = [];
+  const modules: DependencyQueryResult['data']['modules'] = [];
+  const violations: unknown[] = [];
+  const blindSpots: unknown[] = [];
+  const crossRootEdges: unknown[] = [];
+  const strictTarget = selection.roots.length === 1;
+  for (const root of selection.roots) {
+    const analysis = analyzeDepsForRoot(
+      options.projectRoot,
+      root,
+      target,
+      type,
+      reverse,
+      strictTarget,
+    );
+    notes.push(...analysis.notes);
+    for (const module of analysis.modules) modules.push({ ...module, rootId: root.rootId });
+    for (const violation of analysis.violations) {
+      violations.push({ ...(violation as Record<string, unknown>), rootId: root.rootId });
+    }
+    blindSpots.push(...analysis.blindSpots);
+    crossRootEdges.push(...analysis.crossRootEdges);
+    groups.push(
+      rootGroup(root, analysis.items, {
+        total: analysis.items.length,
+        returned: analysis.items.length,
+        certain: analysis.certain,
+        heuristic: analysis.heuristic,
+        dynamicUnresolved: analysis.dynamicUnresolved,
+        partial: root.staleness === 'fresh' ? 0 : analysis.items.length,
+      }),
+    );
+  }
+  const result = groupedEnvelope({
+    command: 'deps',
+    selection,
+    groups,
+    warnings: context.warnings,
+    budget: context.budget,
+    notes: [...new Set(notes)],
+    mode: modeFor(selection.roots),
+  });
+  return {
+    envelope: result,
+    type,
+    target,
+    reverse,
+    data: {
+      modules,
+      violations,
+      blindSpots,
+      crossRootEdges,
+    },
+  };
 }

@@ -154,6 +154,20 @@ export interface ArchitectureModuleRecord {
   symbolCount: number;
 }
 
+export type TestType = 'unit' | 'integration' | 'e2e' | 'unknown';
+
+export interface TestRecord {
+  testFile: string;
+  targetSymbolId: string | null;
+  targetFile: string | null;
+  testType: TestType;
+  relationClass: RelationClass;
+  confidence: Confidence;
+  analysisEngine: string;
+  line: number;
+  evidence: RelationEvidence;
+}
+
 export interface ArchitectureViolationRecord {
   ruleId: string;
   fromModule: string;
@@ -279,9 +293,32 @@ export interface Counts {
   partial: number;
 }
 
+export interface RootGroup<T> {
+  rootId: string;
+  rootPath: string;
+  staleness: StalenessState;
+  buildFingerprint: string | null;
+  counts: Counts;
+  coverage: Coverage;
+  items: T[];
+  truncated: boolean;
+  nextCursor: string | null;
+  notes: string[];
+}
+
 export interface QueryEnvelope<T> {
   command: string;
   rootId: string | null;
+  /** Query-time root scope (docs/05-data-model.md 5.9). */
+  scope?: 'root' | 'roots' | 'all';
+  /** Per-root groups for `roots` / `all`; groups keep their own order. */
+  byRoot?: RootGroup<T>[];
+  /** Same name found in more than one root: never merged, never silently picked. */
+  globalAmbiguous?: boolean;
+  identityCandidates?: unknown[];
+  staleRoots?: string[];
+  failedRoots?: string[];
+  completeness?: 'complete' | 'partial';
   counts: Counts;
   coverage: Coverage;
   truncated: boolean;

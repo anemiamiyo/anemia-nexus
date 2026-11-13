@@ -9,6 +9,7 @@ import {
   WRITE_BATCH_SIZE,
   type CallRecord,
   type DependencyRecord,
+  type ReferenceRecord,
   type SymbolRecord,
 } from 'anemia-core';
 import { ANALYZER_VERSION } from '../src/index/analyzer.js';
@@ -70,7 +71,7 @@ function header(dbPath: string) {
     fields: {
       filesHash: 'files',
       configHash: 'config',
-      schemaVersion: 3,
+      schemaVersion: 4,
       analyzerVersion: ANALYZER_VERSION,
       rootSetHash: 'roots',
       nodeVersion: process.versions.node,
@@ -112,6 +113,24 @@ function dependency(): DependencyRecord {
       constraints: [],
       missReason: null,
     },
+  };
+}
+
+function testReference(targetSymbolId: string): ReferenceRecord {
+  return {
+    targetSymbolId,
+    targetScipSymbol: null,
+    sourceSymbolId: null,
+    sourceFile: 'src/a.test.ts',
+    kind: 'call',
+    role: 'call',
+    relationClass: 'certain',
+    confidence: 'typed',
+    analysisEngine: 'ts-ast',
+    line: 3,
+    col: 2,
+    unresolvedReason: null,
+    buildId: 'b_test0001',
   };
 }
 
@@ -272,14 +291,46 @@ describe('streaming SQLite writer', () => {
     }
   });
 
-  it('refuses a v2 database with E06 instead of silently migrating', () => {
-    const directory = makeEmptyProject('writer-v2');
+  it('derives the tests relation from test-file references', () => {
+    const directory = makeEmptyProject('writer-tests');
+    directories.push(directory);
+    const dbPath = path.join(directory, '.nexus', 'roots', 'root', 'index.db');
+    const target = symbolAt(0);
+    const result = commitBuild({
+      ...header(dbPath),
+      files: [file()],
+      symbols: [target],
+      references: [testReference(target.symbolId)],
+      dependencies: [],
+      calls: [],
+      architectureModules: [],
+      architectureViolations: [],
+      mappingRows: [],
+      components: [],
+      vueFileMeta: [],
+    });
+    expect(result.counts.tests).toBe(1);
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      const row = db
+        .prepare('select test_file, test_type, target_symbol_id from tests limit 1')
+        .get() as { test_file?: string; test_type?: string; target_symbol_id?: string };
+      expect(row.test_file).toBe('src/a.test.ts');
+      expect(row.test_type).toBe('unit');
+      expect(row.target_symbol_id).toBe(target.symbolId);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('refuses a v3 database with E06 instead of silently migrating', () => {
+    const directory = makeEmptyProject('writer-v3');
     directories.push(directory);
     const dbPath = path.join(directory, '.nexus', 'roots', 'root', 'index.db');
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     const legacy = new DatabaseSync(dbPath);
     legacy.exec('create table meta (key text primary key, value text not null) strict');
-    legacy.prepare('insert into meta(key, value) values (?, ?)').run('schema_version', '2');
+    legacy.prepare('insert into meta(key, value) values (?, ?)').run('schema_version', '3');
     legacy.close();
 
     let code = '';

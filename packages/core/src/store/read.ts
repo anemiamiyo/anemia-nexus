@@ -13,6 +13,7 @@ import type {
   ReferenceRecord,
   RelationEvidence,
   SymbolRecord,
+  TestRecord,
   VueFileMetaRecord,
 } from '../model.js';
 import {
@@ -113,6 +114,24 @@ export function readSymbolById(store: ReadStore, symbolId: string): SymbolRecord
     .prepare(`select ${SYMBOL_COLUMNS} from symbols where symbol_id = ? and build_id = ?`)
     .get(symbolId, store.build.buildId) as Record<string, unknown> | undefined;
   return row === undefined ? null : rowToSymbol(row);
+}
+
+export function readSymbolsForFile(store: ReadStore, filePath: string): SymbolRecord[] {
+  const rows = store.db
+    .prepare(
+      `select ${SYMBOL_COLUMNS} from symbols where build_id = ? and path = ? order by start_line, start_col`,
+    )
+    .all(store.build.buildId, filePath) as Array<Record<string, unknown>>;
+  return rows.map(rowToSymbol);
+}
+
+export function readSymbolsForPathPrefix(store: ReadStore, prefix: string): SymbolRecord[] {
+  const rows = store.db
+    .prepare(
+      `select ${SYMBOL_COLUMNS} from symbols where build_id = ? and (path = ? or path like ?) order by path, start_line, start_col`,
+    )
+    .all(store.build.buildId, prefix, `${prefix}/%`) as Array<Record<string, unknown>>;
+  return rows.map(rowToSymbol);
 }
 
 export function findSymbolsByName(store: ReadStore, name: string, limit = 50): SymbolRecord[] {
@@ -469,4 +488,70 @@ export function readArchitectureViolations(store: ReadStore): ArchitectureViolat
     analysisEngine: String(row.analysis_engine ?? ''),
     evidence: parseEvidence(row.evidence_json),
   }));
+}
+
+function rowToTest(row: Record<string, unknown>): TestRecord {
+  return {
+    testFile: String(row.test_file ?? ''),
+    targetSymbolId: typeof row.target_symbol_id === 'string' ? row.target_symbol_id : null,
+    targetFile: typeof row.target_file === 'string' ? row.target_file : null,
+    testType: String(row.test_type ?? 'unknown') as TestRecord['testType'],
+    relationClass: String(row.relation_class ?? 'certain') as TestRecord['relationClass'],
+    confidence: String(row.confidence ?? 'typed') as TestRecord['confidence'],
+    analysisEngine: String(row.analysis_engine ?? ''),
+    line: Number(row.line ?? 0),
+    evidence: parseEvidence(row.evidence_json),
+  };
+}
+
+const TEST_COLUMNS = `test_file, target_symbol_id, target_file, test_type, relation_class, confidence, analysis_engine, line, evidence_json`;
+
+export function readTestsForSymbol(store: ReadStore, symbolId: string, limit = 500): TestRecord[] {
+  const rows = store.db
+    .prepare(
+      `select ${TEST_COLUMNS} from tests where build_id = ? and target_symbol_id = ? order by test_file, line limit ?`,
+    )
+    .all(store.build.buildId, symbolId, Math.min(Math.max(limit, 1), 5000)) as Array<
+    Record<string, unknown>
+  >;
+  return rows.map(rowToTest);
+}
+
+export function readTestsForFile(store: ReadStore, file: string, limit = 1000): TestRecord[] {
+  const rows = store.db
+    .prepare(
+      `select ${TEST_COLUMNS} from tests where build_id = ? and target_file = ? order by test_file, line limit ?`,
+    )
+    .all(store.build.buildId, file, Math.min(Math.max(limit, 1), 5000)) as Array<
+    Record<string, unknown>
+  >;
+  return rows.map(rowToTest);
+}
+
+export function readTestsForTestFile(store: ReadStore, testFile: string): TestRecord[] {
+  const rows = store.db
+    .prepare(`select ${TEST_COLUMNS} from tests where build_id = ? and test_file = ? order by line`)
+    .all(store.build.buildId, testFile) as Array<Record<string, unknown>>;
+  return rows.map(rowToTest);
+}
+
+export function readOwnerModule(store: ReadStore, file: string): string | null {
+  const row = store.db
+    .prepare('select owner_module from files where build_id = ? and path = ?')
+    .get(store.build.buildId, file) as { owner_module?: unknown } | undefined;
+  return typeof row?.owner_module === 'string' ? row.owner_module : null;
+}
+
+export function countTests(store: ReadStore): number {
+  const row = store.db
+    .prepare('select count(*) as count from tests where build_id = ?')
+    .get(store.build.buildId) as { count?: unknown };
+  return typeof row.count === 'number' ? row.count : 0;
+}
+
+export function countTestFiles(store: ReadStore): number {
+  const row = store.db
+    .prepare('select count(distinct test_file) as count from tests where build_id = ?')
+    .get(store.build.buildId) as { count?: unknown };
+  return typeof row.count === 'number' ? row.count : 0;
 }

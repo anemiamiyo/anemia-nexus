@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -252,7 +253,7 @@ describe('lifecycle commands', () => {
   it('never returns fake success for unimplemented commands', async () => {
     const directory = makeEmptyProject('cli-stub');
     try {
-      for (const command of ['update', 'impact', 'mcp', 'print', 'test']) {
+      for (const command of ['update', 'mcp', 'print', 'test']) {
         const result = await runCli([command, '--format', 'json'], directory);
         expect(result.code).toBe(1);
         expect(result.stdout).toContain('E24');
@@ -300,6 +301,88 @@ describe('lifecycle commands', () => {
       cleanup(directory);
     }
   });
+});
+
+describe('Phase 05 audit commands', () => {
+  it('renders impact and preflight in lines/json/markdown', async () => {
+    const directory = makeProject('F08-refactor', 'cli-audit');
+    try {
+      await runCli(['init', '--roots', 'all', '--write-config', '--yes'], directory);
+      await runCli(['build'], directory);
+
+      let result = await runCli(
+        ['impact', 'src/core.ts', '--depth', '4', '--format', 'json'],
+        directory,
+      );
+      expect(result.code).toBe(0);
+      const impact = JSON.parse(result.stdout) as {
+        direct: { count: number };
+        indirect: { count: number };
+        risk: { level: string; reasons: unknown[] };
+      };
+      expect(impact.direct.count).toBeGreaterThan(0);
+      expect(impact.indirect.count).toBeGreaterThan(0);
+      expect(impact.risk.level).toBeTruthy();
+      expect(impact.risk.reasons.length).toBeGreaterThan(0);
+
+      result = await runCli(['impact', '--symbol', 'useOverlay', '--format', 'lines'], directory);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain('risk');
+      expect(result.stdout).not.toContain('\u001b');
+
+      result = await runCli(
+        ['preflight', '--task', 'add a close method to the overlay', '--format', 'json'],
+        directory,
+      );
+      expect(result.code).toBe(0);
+      const preflight = JSON.parse(result.stdout) as {
+        similar: { rulesVersion: string; candidates: unknown[] };
+        context: { budget: { layer: string } };
+      };
+      expect(preflight.similar.rulesVersion).toBe('9.1.1');
+      expect(preflight.context.budget.layer).toBe('summary');
+
+      result = await runCli(['preflight', '--symbol', 'useOverlay', '--report', 'md'], directory);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain('# nex preflight');
+    } finally {
+      cleanup(directory);
+    }
+  });
+
+  it('fails postflight outside a git work tree with E00', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'nex-postflight-'));
+    try {
+      const result = await runCli(['postflight', '--format', 'json'], directory);
+      expect(result.code).toBe(64);
+      expect(result.stdout).toContain('E00');
+    } finally {
+      cleanup(directory);
+    }
+  });
+
+  it('supports verify --dry-run and prefixes multi-root query lines', async () => {
+    const directory = makeProject('F14-multi-root', 'cli-routing');
+    try {
+      await runCli(
+        ['init', '--roots', 'all', '--write-config', '--yes', '--no-typecheck'],
+        directory,
+      );
+      await runCli(['build'], directory);
+      let result = await runCli(['search', '--roots', 'all', '--format', 'lines'], directory);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toMatch(/^\[[^\]]+\] /m);
+      result = await runCli(['search', '--format', 'lines'], directory);
+      expect(result.code).toBe(64);
+      expect(result.stdout).toContain('E16');
+      result = await runCli(['verify', '--dry-run', '--format', 'json'], directory);
+      expect(result.code).toBe(0);
+      const payload = JSON.parse(result.stdout) as { commands: unknown[] };
+      expect(Array.isArray(payload.commands)).toBe(true);
+    } finally {
+      cleanup(directory);
+    }
+  }, 180_000);
 });
 
 describe('API Surface commands', () => {

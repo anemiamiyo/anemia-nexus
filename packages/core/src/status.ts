@@ -23,6 +23,10 @@ export const CAPABILITIES = {
   dependencyGraph: 'file-level',
   callGraph: 'static-ts',
   architectureRules: 'allow-list',
+  testRelations: 'reference-call-derived',
+  impactAnalysis: 'certain-with-blind-spots',
+  auditOrchestration: 'cli-only',
+  queryRootRouting: 'root|roots|all',
   incremental: false,
   mcpFormats: [] as string[],
   dynamicUnresolved: 'marked',
@@ -53,6 +57,7 @@ export interface RootStatus {
   references: number;
   dependencies: number;
   calls: number;
+  tests: number;
   styleEdges: number;
   crossRootEdges: number;
   architectureViolations: number;
@@ -298,6 +303,7 @@ export async function statusReport(options: StatusOptions): Promise<StatusReport
         references: 0,
         dependencies: 0,
         calls: 0,
+        tests: 0,
         styleEdges: 0,
         crossRootEdges: 0,
         architectureViolations: 0,
@@ -379,6 +385,7 @@ export async function statusReport(options: StatusOptions): Promise<StatusReport
       references: manifest.counts?.references ?? 0,
       dependencies: manifest.graph?.dependencies ?? manifest.counts?.dependencies ?? 0,
       calls: manifest.graph?.calls ?? manifest.counts?.calls ?? 0,
+      tests: manifest.graph?.tests ?? manifest.counts?.tests ?? 0,
       styleEdges: manifest.graph?.styleEdges ?? 0,
       crossRootEdges: manifest.graph?.crossRootEdges ?? 0,
       architectureViolations: manifest.graph?.architectureViolations ?? 0,

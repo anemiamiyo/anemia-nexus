@@ -81,6 +81,47 @@ export type {
   DependencyQueryResult,
 } from './query/service.js';
 export { openReadStore } from './store/read.js';
+export { resolveQueryScope } from './query/routing.js';
+export type { QueryScope, ScopeSelection, ScopeCandidate } from './query/routing.js';
+export { analyzeImpact, impactData } from './audit/impact.js';
+export type {
+  ImpactOptions,
+  ImpactResult,
+  RootImpactReport,
+  ImpactItem,
+  ImpactRisk,
+  ImpactTarget,
+  ImpactTargetKind,
+  StyleDependent,
+} from './audit/impact.js';
+export { runPreflight } from './audit/preflight.js';
+export type { PreflightData, PreflightOptions, PreflightSource } from './audit/preflight.js';
+export { runPostflight } from './audit/postflight.js';
+export type {
+  ChangedSymbol,
+  FailOn,
+  Finding,
+  PostflightData,
+  PostflightOptions,
+} from './audit/postflight.js';
+export { runVerify, readTrust, writeTrust, commandSignature } from './audit/verify.js';
+export type {
+  TrustEntry,
+  TrustFile,
+  VerifyCommandResult,
+  VerifyOptions,
+  VerifyResult,
+} from './audit/verify.js';
+export { buildTaskContext } from './audit/context.js';
+export type { ContextItem, TaskContextPacket } from './audit/context.js';
+export {
+  findSimilar,
+  extractSymbolNames,
+  scoreCandidate,
+  parseSignature,
+  SIMILARITY_RULES_VERSION,
+} from './audit/similar.js';
+export type { SimilarityCandidate, SimilarityBreakdown, SignatureParts } from './audit/similar.js';
 export { probeSqlite } from './store/db.js';
 export type {
   Coverage,

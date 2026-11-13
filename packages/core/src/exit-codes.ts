@@ -20,6 +20,7 @@ export type ExitCode =
 export function exitCodeForError(error: NexusError): ExitCode {
   switch (error.code) {
     case 'E00':
+    case 'E16':
       return EXIT_USAGE;
     case 'E23':
       return EXIT_INTERNAL;
